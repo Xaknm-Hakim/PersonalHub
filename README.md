@@ -57,6 +57,32 @@ npm run docker:down
 
 The compose file bind-mounts `./data` to `/app/data`, so SQLite persists on the host at `./data/personalhub.db`. Container startup runs `prisma migrate deploy` before `npm start`. It does not seed or delete existing data.
 
+## Local database backups
+
+Create a timestamped local backup of `./data/personalhub.db`:
+
+```bash
+npm run db:backup
+```
+
+This writes a file like `./backups/personalhub-YYYY-MM-DD-HHMMSS.db`. Backup database files are ignored by Git.
+
+Restore from a backup:
+
+```bash
+npm run db:restore -- ./backups/personalhub-example.db
+```
+
+The restore script checks that the backup exists, asks you to type `YES`, and creates a safety backup of the current database before overwriting `./data/personalhub.db`. Stop the Docker container first if the app is actively writing to the database:
+
+```bash
+npm run docker:down
+npm run db:restore -- ./backups/personalhub-example.db
+npm run docker:up
+```
+
+Backups are local files. Copy important backups to external storage sometimes so they are not lost with the laptop or project folder.
+
 ## Build
 
 ```bash

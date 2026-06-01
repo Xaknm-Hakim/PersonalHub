@@ -9,10 +9,10 @@
 - Timeline
 - Calendar
 - Docker support for daily local usage
+- Local backup/export scripts
 
 ## Future version ideas
 
-- Backup/export
 - Recurring tasks
 - Weekly report
 - Search improvements
