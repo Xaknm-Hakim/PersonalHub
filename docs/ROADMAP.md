@@ -10,6 +10,8 @@
 - Calendar
 - Docker support for daily local usage
 - Local backup/export scripts
+- Calendar month navigation
+- Assignment categories
 
 ## Future version ideas
 

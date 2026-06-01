@@ -85,11 +85,11 @@ async function main() {
       courseName: "Web Application Development",
       title: "Personal Portfolio Website",
       description: "Build a responsive portfolio with project cards and contact form.",
+      type: "project",
       status: "in_progress",
       priority: "urgent",
       startDate: daysFromNow(-5),
       deadline: daysFromNow(3, 23),
-      weight: 25,
       tags: { connect: [{ id: diploma.id }, { id: programming.id }, { id: urgent.id }] }
     }
   });
@@ -101,23 +101,22 @@ async function main() {
         courseName: "Database Systems",
         title: "ERD and Normalization Report",
         description: "Prepare ERD, relational schema, and 3NF explanation.",
+        type: "assignment",
         status: "not_started",
         priority: "high",
         startDate: daysFromNow(0),
-        deadline: daysFromNow(6, 23),
-        weight: 20
+        deadline: daysFromNow(6, 23)
       },
       {
         courseCode: "STA110",
         courseName: "Statistics for Computing",
         title: "Probability Problem Set",
         description: "Complete questions 1 to 12 with workings.",
+        type: "exercise",
         status: "submitted",
         priority: "medium",
         startDate: daysFromNow(-7),
-        deadline: daysFromNow(-1, 23),
-        weight: 10,
-        marks: 8
+        deadline: daysFromNow(-1, 23)
       }
     ]
   });
@@ -126,7 +125,7 @@ async function main() {
     data: [
       {
         title: "Web app rubric reminders",
-        body: "Marks are weighted toward accessibility, semantic HTML, and consistent spacing.",
+        body: "Rubric focuses on accessibility, semantic HTML, and consistent spacing.",
         linkedTaskId: webTask.id,
         linkedAssignmentId: assignment.id
       },

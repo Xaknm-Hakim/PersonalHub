@@ -27,12 +27,11 @@ model Assignment {
   courseName  String
   title       String
   description String?
+  type        String           @default("assignment")
   status      String           @default("not_started")
   priority    String           @default("medium")
   startDate   DateTime?
   deadline    DateTime
-  weight      Float?
-  marks       Float?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   notes       Note[]

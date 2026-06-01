@@ -15,11 +15,6 @@ function optionalText(formData: FormData, key: string) {
   return value || null;
 }
 
-function optionalNumber(formData: FormData, key: string) {
-  const value = text(formData, key);
-  return value ? Number(value) : null;
-}
-
 export async function createTask(formData: FormData) {
   await prisma.task.create({
     data: {
@@ -64,12 +59,11 @@ export async function createAssignment(formData: FormData) {
       courseName: text(formData, "courseName"),
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
+      type: text(formData, "type") || "assignment",
       status: text(formData, "status"),
       priority: text(formData, "priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
-      deadline: parseOptionalDate(formData.get("deadline")) ?? new Date(),
-      weight: optionalNumber(formData, "weight"),
-      marks: optionalNumber(formData, "marks")
+      deadline: parseOptionalDate(formData.get("deadline")) ?? new Date()
     }
   });
   revalidatePath("/assignments");
@@ -84,12 +78,11 @@ export async function updateAssignment(formData: FormData) {
       courseName: text(formData, "courseName"),
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
+      type: text(formData, "type") || "assignment",
       status: text(formData, "status"),
       priority: text(formData, "priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
-      deadline: parseOptionalDate(formData.get("deadline")) ?? new Date(),
-      weight: optionalNumber(formData, "weight"),
-      marks: optionalNumber(formData, "marks")
+      deadline: parseOptionalDate(formData.get("deadline")) ?? new Date()
     }
   });
   revalidatePath("/assignments");
