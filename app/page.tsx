@@ -3,11 +3,20 @@ import { prisma } from "@/lib/prisma";
 import { countProjectsByStatus, findProjects } from "@/lib/projects";
 import { formatDate, isBeforeToday, priorityClass, statusLabel } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 
 export const dynamic = "force-dynamic";
+
+const closedAssignmentStatuses = ["submitted", "graded", "completed", "cancelled"];
+const priorityRank: Record<string, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3
+};
 
 export default async function DashboardPage() {
   const today = new Date();
@@ -26,6 +35,7 @@ export default async function DashboardPage() {
     completedTasks,
     dueThisWeekAssignments,
     overdueAssignments,
+    overdueAssignmentItems,
     activeProjects,
     pausedProjectsCount,
     recentProjects,
@@ -50,7 +60,11 @@ export default async function DashboardPage() {
       prisma.assignment.count({
         where: { deadline: { gte: today, lte: inSevenDays }, status: { notIn: ["submitted", "graded", "cancelled"] } }
       }),
-      prisma.assignment.count({ where: { deadline: { lt: today }, status: { notIn: ["submitted", "graded", "cancelled"] } } }),
+      prisma.assignment.count({ where: { deadline: { lt: today }, status: { notIn: closedAssignmentStatuses } } }),
+      prisma.assignment.findMany({
+        where: { deadline: { lt: today }, status: { notIn: closedAssignmentStatuses } },
+        orderBy: { deadline: "asc" }
+      }),
       findProjects({ take: 20 }),
       countProjectsByStatus("paused"),
       findProjects({ take: 3 }),
@@ -61,6 +75,13 @@ export default async function DashboardPage() {
   const nextActionProjectItems = nextActionProjects
     .filter((project) => project.nextAction && ["planned", "developing", "active", "paused"].includes(project.status))
     .slice(0, 3);
+  const topOverdueAssignments = overdueAssignmentItems
+    .sort((first, second) => {
+      const priorityDifference = (priorityRank[first.priority] ?? 99) - (priorityRank[second.priority] ?? 99);
+      if (priorityDifference !== 0) return priorityDifference;
+      return first.deadline.getTime() - second.deadline.getTime();
+    })
+    .slice(0, 5);
 
   const stats = [
     ["Open tasks", openTasks],
@@ -101,6 +122,7 @@ export default async function DashboardPage() {
             />
           ))}
         </SummaryCard>
+        <OverdueAssignmentsCard assignments={topOverdueAssignments} today={today} />
         <SummaryCard title="Assignments due within 7 days" empty="No assignments due in the next week.">
           {upcomingAssignments.map((assignment) => (
             <ItemRow
@@ -143,6 +165,73 @@ export default async function DashboardPage() {
         </Card>
       </section>
     </>
+  );
+}
+
+function daysOverdue(deadline: Date, today: Date) {
+  const date = new Date(deadline);
+  date.setHours(0, 0, 0, 0);
+  return Math.max(1, Math.floor((today.getTime() - date.getTime()) / 86_400_000));
+}
+
+function OverdueAssignmentsCard({
+  assignments,
+  today
+}: {
+  assignments: {
+    id: string;
+    title: string;
+    courseCode: string;
+    courseName: string;
+    type: string;
+    status: string;
+    priority: string;
+    deadline: Date;
+  }[];
+  today: Date;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+        <div>
+          <CardTitle>Overdue assignments</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">Highest priority first, then oldest deadline.</p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/assignments">Assignments</Link>
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {assignments.length === 0 ? (
+          <EmptyState title="No overdue assignments." message="Nothing needs attention in this section." />
+        ) : (
+          assignments.map((assignment) => {
+            const overdueDays = daysOverdue(assignment.deadline, today);
+            return (
+              <Link key={assignment.id} href={`/assignments?edit=${assignment.id}`} className="block rounded-md border bg-card p-3 hover:bg-muted">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{assignment.title}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {assignment.courseCode}
+                      {assignment.courseName ? ` · ${assignment.courseName}` : ""}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-red-600 dark:text-red-300">
+                      Deadline {formatDate(assignment.deadline)} · {overdueDays} {overdueDays === 1 ? "day" : "days"} overdue
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-1">
+                    <Badge>{statusLabel(assignment.type)}</Badge>
+                    <Badge>{statusLabel(assignment.status)}</Badge>
+                    <Badge className={priorityClass(assignment.priority)}>{assignment.priority}</Badge>
+                  </div>
+                </div>
+              </Link>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
