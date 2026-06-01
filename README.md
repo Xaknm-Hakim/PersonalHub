@@ -36,6 +36,27 @@ Open `http://localhost:3000`.
 
 The theme toggle in the main navigation switches between light and dark mode. The selected theme is saved in `localStorage`; without a saved choice, the app follows the system preference.
 
+## Docker local usage
+
+Docker runs PersonalHub in production mode for daily localhost usage. The container listens on port `3000`, and Docker Compose exposes it on host port `3001`.
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+docker compose down
+```
+
+Equivalent npm helpers:
+
+```bash
+npm run docker:build
+npm run docker:up
+npm run docker:logs
+npm run docker:down
+```
+
+The compose file bind-mounts `./data` to `/app/data`, so SQLite persists on the host at `./data/personalhub.db`. Container startup runs `prisma migrate deploy` before `npm start`. It does not seed or delete existing data.
+
 ## Build
 
 ```bash

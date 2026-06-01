@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);

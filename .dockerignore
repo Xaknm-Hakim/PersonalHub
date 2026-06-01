@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+npm-debug.log*
+.DS_Store

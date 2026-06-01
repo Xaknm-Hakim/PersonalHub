@@ -1,0 +1,17 @@
+services:
+  personalhub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: personalhub
+    environment:
+      DATABASE_URL: file:../data/personalhub.db
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

@@ -8,6 +8,7 @@
 - Notes
 - Timeline
 - Calendar
+- Docker support for daily local usage
 
 ## Future version ideas
 
@@ -16,6 +17,6 @@
 - Weekly report
 - Search improvements
 - Local password lock
-- Docker deployment
+- Docker improvements
 - LAN access
 - Cloudflare Tunnel only after security review

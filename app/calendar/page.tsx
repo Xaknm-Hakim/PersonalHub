@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { prisma } from "@/lib/prisma";
 import { isBeforeToday } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export default async function CalendarPage() {
   const today = new Date();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
