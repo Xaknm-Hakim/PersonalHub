@@ -11,6 +11,7 @@ function daysFromNow(days: number, hour = 9) {
 
 async function main() {
   await prisma.note.deleteMany();
+  await prisma.project.deleteMany();
   await prisma.task.deleteMany();
   await prisma.assignment.deleteMany();
   await prisma.tag.deleteMany();
@@ -120,6 +121,70 @@ async function main() {
       }
     ]
   });
+
+  const projects = [
+    {
+        title: "StudexHub v1",
+        status: "archived",
+        type: "software",
+        priority: "medium",
+        techStack: "Next.js, TypeScript, Prisma, PostgreSQL, Docker, Nginx, Cloudflare Tunnel",
+        description: "Academic/student platform prototype and infrastructure learning project.",
+        startDate: daysFromNow(-180),
+        completedAt: daysFromNow(-90),
+        currentProgress: "Archived after validating the prototype and deployment path.",
+        lessonsLearned: "Learned production-style reverse proxying, container deployment, and tunnel-based access."
+    },
+    {
+        title: "PersonalHub",
+        status: "developing",
+        type: "software",
+        priority: "high",
+        techStack: "Next.js, TypeScript, Prisma, SQLite, Docker Compose, Tailwind",
+        description: "Private local-first personal operations system.",
+        startDate: daysFromNow(-14),
+        targetDate: daysFromNow(30),
+        objective: "Build a private control panel for tasks, assignments, notes, calendar, timeline, and project memory.",
+        currentProgress: "Core local productivity modules are running.",
+        nextAction: "Keep shaping modules around real daily use."
+    },
+    {
+        title: "Packet Tracer Campus Network Lab",
+        status: "completed",
+        type: "networking",
+        priority: "medium",
+        techStack: "Cisco Packet Tracer, VLAN, OSPF, Inter-VLAN Routing, NAT",
+        description: "Campus-style networking topology lab.",
+        startDate: daysFromNow(-45),
+        completedAt: daysFromNow(-25),
+        currentProgress: "Completed topology and routing validation.",
+        lessonsLearned: "Practiced segmentation, dynamic routing, and edge NAT behavior."
+    },
+    {
+        title: "Terraform AWS EC2 Lab",
+        status: "planned",
+        type: "cloud",
+        priority: "high",
+        techStack: "Terraform, AWS EC2, VPC, Security Groups",
+        description: "Planned cloud infrastructure automation lab.",
+        targetDate: daysFromNow(45),
+        objective: "Provision a minimal EC2 environment with repeatable infrastructure code.",
+        nextAction: "Draft the Terraform module structure and variable inputs."
+    },
+    {
+        title: "Docker Monitoring Stack",
+        status: "planned",
+        type: "infrastructure",
+        priority: "medium",
+        techStack: "Docker Compose, Prometheus, Grafana, cAdvisor",
+        description: "Planned local monitoring stack for personal services.",
+        targetDate: daysFromNow(60),
+        objective: "Monitor local containers without adding cloud dependencies.",
+        nextAction: "Define compose services and persistent volumes."
+    }
+  ];
+
+  await prisma.project.createMany({ data: projects });
 
   await prisma.note.createMany({
     data: [

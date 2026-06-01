@@ -95,6 +95,70 @@ export async function deleteAssignment(formData: FormData) {
   revalidatePath("/");
 }
 
+export async function createProject(formData: FormData) {
+  await prisma.project.create({
+    data: {
+      title: text(formData, "title"),
+      description: optionalText(formData, "description"),
+      status: text(formData, "status") || "planned",
+      type: text(formData, "type") || "other",
+      priority: text(formData, "priority") || "medium",
+      startDate: parseOptionalDate(formData.get("startDate")),
+      targetDate: parseOptionalDate(formData.get("targetDate")),
+      completedAt: parseOptionalDate(formData.get("completedAt")),
+      repositoryUrl: optionalText(formData, "repositoryUrl"),
+      localPath: optionalText(formData, "localPath"),
+      liveUrl: optionalText(formData, "liveUrl"),
+      techStack: optionalText(formData, "techStack"),
+      objective: optionalText(formData, "objective"),
+      currentProgress: optionalText(formData, "currentProgress"),
+      nextAction: optionalText(formData, "nextAction"),
+      lessonsLearned: optionalText(formData, "lessonsLearned")
+    }
+  });
+  revalidatePath("/projects");
+  revalidatePath("/");
+  revalidatePath("/timeline");
+  revalidatePath("/calendar");
+}
+
+export async function updateProject(formData: FormData) {
+  await prisma.project.update({
+    where: { id: text(formData, "id") },
+    data: {
+      title: text(formData, "title"),
+      description: optionalText(formData, "description"),
+      status: text(formData, "status") || "planned",
+      type: text(formData, "type") || "other",
+      priority: text(formData, "priority") || "medium",
+      startDate: parseOptionalDate(formData.get("startDate")),
+      targetDate: parseOptionalDate(formData.get("targetDate")),
+      completedAt: parseOptionalDate(formData.get("completedAt")),
+      repositoryUrl: optionalText(formData, "repositoryUrl"),
+      localPath: optionalText(formData, "localPath"),
+      liveUrl: optionalText(formData, "liveUrl"),
+      techStack: optionalText(formData, "techStack"),
+      objective: optionalText(formData, "objective"),
+      currentProgress: optionalText(formData, "currentProgress"),
+      nextAction: optionalText(formData, "nextAction"),
+      lessonsLearned: optionalText(formData, "lessonsLearned")
+    }
+  });
+  revalidatePath("/projects");
+  revalidatePath("/");
+  revalidatePath("/timeline");
+  revalidatePath("/calendar");
+  redirect("/projects");
+}
+
+export async function deleteProject(formData: FormData) {
+  await prisma.project.delete({ where: { id: text(formData, "id") } });
+  revalidatePath("/projects");
+  revalidatePath("/");
+  revalidatePath("/timeline");
+  revalidatePath("/calendar");
+}
+
 export async function createNote(formData: FormData) {
   const linkedTaskId = optionalText(formData, "linkedTaskId");
   const linkedAssignmentId = optionalText(formData, "linkedAssignmentId");

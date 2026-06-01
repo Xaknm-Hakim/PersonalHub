@@ -6,12 +6,16 @@
 - Tasks
 - Assignments
 - Notes
+- Projects
 - Timeline
 - Calendar
 - Docker support for daily local usage
 - Local backup/export scripts
 - Calendar month navigation
 - Assignment categories
+- Project filters and sorting
+- Project Dashboard summary
+- Basic Project Timeline and Calendar milestones
 
 ## Future version ideas
 
@@ -22,3 +26,6 @@
 - Docker improvements
 - LAN access
 - Cloudflare Tunnel only after security review
+- Project milestones
+- Project search
+- Project export

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { countProjectsByStatus, findProjects } from "@/lib/projects";
 import { formatDate, isBeforeToday, priorityClass, statusLabel } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,20 @@ export default async function DashboardPage() {
   const inSevenDays = new Date(today);
   inSevenDays.setDate(today.getDate() + 7);
 
-  const [todayTasks, overdueTasks, upcomingAssignments, recentNotes, openTasks, completedTasks, dueThisWeekAssignments, overdueAssignments] =
+  const [
+    todayTasks,
+    overdueTasks,
+    upcomingAssignments,
+    recentNotes,
+    openTasks,
+    completedTasks,
+    dueThisWeekAssignments,
+    overdueAssignments,
+    activeProjects,
+    pausedProjectsCount,
+    recentProjects,
+    nextActionProjects
+  ] =
     await Promise.all([
       prisma.task.findMany({
         where: { dueDate: { gte: today, lt: tomorrow }, status: { notIn: ["done", "cancelled"] } },
@@ -36,8 +50,17 @@ export default async function DashboardPage() {
       prisma.assignment.count({
         where: { deadline: { gte: today, lte: inSevenDays }, status: { notIn: ["submitted", "graded", "cancelled"] } }
       }),
-      prisma.assignment.count({ where: { deadline: { lt: today }, status: { notIn: ["submitted", "graded", "cancelled"] } } })
+      prisma.assignment.count({ where: { deadline: { lt: today }, status: { notIn: ["submitted", "graded", "cancelled"] } } }),
+      findProjects({ take: 20 }),
+      countProjectsByStatus("paused"),
+      findProjects({ take: 3 }),
+      findProjects({ take: 20 })
     ]);
+
+  const activeProjectItems = activeProjects.filter((project) => ["developing", "active"].includes(project.status)).slice(0, 3);
+  const nextActionProjectItems = nextActionProjects
+    .filter((project) => project.nextAction && ["planned", "developing", "active", "paused"].includes(project.status))
+    .slice(0, 3);
 
   const stats = [
     ["Open tasks", openTasks],
@@ -92,6 +115,17 @@ export default async function DashboardPage() {
         </SummaryCard>
         <Card>
           <CardHeader>
+            <CardTitle>Projects</CardTitle>
+            <p className="text-sm text-muted-foreground">{pausedProjectsCount} paused</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ProjectList title="Developing or active" empty="No active projects." projects={activeProjectItems} />
+            <ProjectList title="Next actions" empty="No next project actions set." projects={nextActionProjectItems} showNextAction />
+            <ProjectList title="Recently updated" empty="No projects yet." projects={recentProjects} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
             <CardTitle>Recent notes</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -109,6 +143,46 @@ export default async function DashboardPage() {
         </Card>
       </section>
     </>
+  );
+}
+
+function ProjectList({
+  title,
+  empty,
+  projects,
+  showNextAction
+}: {
+  title: string;
+  empty: string;
+  projects: { id: string; title: string; status: string; priority: string; nextAction: string | null; updatedAt: Date }[];
+  showNextAction?: boolean;
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">{title}</p>
+      {projects.length === 0 ? (
+        <p className="rounded-md border border-dashed bg-muted/20 p-3 text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <div className="space-y-2">
+          {projects.map((project) => (
+            <Link key={`${title}-${project.id}`} href={`/projects?edit=${project.id}`} className="block rounded-md border bg-card p-3 hover:bg-muted">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium">{project.title}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {showNextAction && project.nextAction ? project.nextAction : `Updated ${formatDate(project.updatedAt)}`}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Badge>{statusLabel(project.status)}</Badge>
+                  <Badge className={priorityClass(project.priority)}>{project.priority}</Badge>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

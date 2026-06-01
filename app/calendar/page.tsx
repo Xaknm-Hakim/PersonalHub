@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/prisma";
+import { findProjectCompletionsBetween, findProjectTargetsBetween } from "@/lib/projects";
 import { isBeforeToday, statusLabel } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -46,13 +47,17 @@ export default async function CalendarPage({
   const previousMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1);
   const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
   const selectedMonthLabel = monthStart.toLocaleDateString("en-MY", { month: "long", year: "numeric" });
-  const [tasks, assignments] = await Promise.all([
+  const [tasks, assignments, targetProjects, completedProjects] = await Promise.all([
     prisma.task.findMany({ where: { dueDate: { gte: gridStart, lte: gridEnd } } }),
-    prisma.assignment.findMany({ where: { deadline: { gte: gridStart, lte: gridEnd } } })
+    prisma.assignment.findMany({ where: { deadline: { gte: gridStart, lte: gridEnd } } }),
+    findProjectTargetsBetween(gridStart, gridEnd),
+    findProjectCompletionsBetween(gridStart, gridEnd)
   ]);
   const events = [
-    ...tasks.map((task) => ({ date: task.dueDate, title: task.title, href: `/tasks?edit=${task.id}`, kind: "Task", overdue: task.status !== "done" && task.status !== "cancelled" && isBeforeToday(task.dueDate) })),
-    ...assignments.map((assignment) => ({ date: assignment.deadline, title: assignment.title, href: `/assignments?edit=${assignment.id}`, kind: statusLabel(assignment.type), overdue: !["submitted", "graded", "cancelled"].includes(assignment.status) && isBeforeToday(assignment.deadline) }))
+    ...tasks.map((task) => ({ id: task.id, date: task.dueDate, title: task.title, href: `/tasks?edit=${task.id}`, kind: "Task", overdue: task.status !== "done" && task.status !== "cancelled" && isBeforeToday(task.dueDate) })),
+    ...assignments.map((assignment) => ({ id: assignment.id, date: assignment.deadline, title: assignment.title, href: `/assignments?edit=${assignment.id}`, kind: statusLabel(assignment.type), overdue: !["submitted", "graded", "cancelled"].includes(assignment.status) && isBeforeToday(assignment.deadline) })),
+    ...targetProjects.map((project) => ({ id: `${project.id}-target`, date: project.targetDate, title: project.title, href: `/projects?edit=${project.id}`, kind: "Project target", overdue: !["completed", "archived", "abandoned"].includes(project.status) && isBeforeToday(project.targetDate) })),
+    ...completedProjects.map((project) => ({ id: `${project.id}-completed`, date: project.completedAt, title: project.title, href: `/projects?edit=${project.id}`, kind: "Project completed", overdue: false }))
   ];
 
   return (
@@ -97,7 +102,7 @@ export default async function CalendarPage({
               <div className="mt-2 space-y-1">
                 {dayEvents.map((event) => (
                   <Link
-                    key={`${event.kind}-${event.title}`}
+                    key={`${event.kind}-${event.id}`}
                     href={event.href}
                     className={
                       event.overdue

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { prisma } from "@/lib/prisma";
+import { findTimelineProjects } from "@/lib/projects";
 import { formatDate, isBeforeToday, priorityClass, statusLabel } from "@/lib/utils";
 
 const dayMs = 86_400_000;
@@ -95,9 +96,10 @@ export default async function TimelinePage({
   const range = params.range ?? "this_month";
   const baseRange = getTimelineRange(range, selectedMonth);
 
-  const [tasks, assignments] = await Promise.all([
-    params.type === "assignments" ? [] : prisma.task.findMany({ orderBy: { dueDate: "asc" } }),
-    params.type === "tasks" ? [] : prisma.assignment.findMany({ orderBy: { deadline: "asc" } })
+  const [tasks, assignments, projects] = await Promise.all([
+    params.type === "assignments" || params.type === "projects" ? [] : prisma.task.findMany({ orderBy: { dueDate: "asc" } }),
+    params.type === "tasks" || params.type === "projects" ? [] : prisma.assignment.findMany({ orderBy: { deadline: "asc" } }),
+    params.type === "tasks" || params.type === "assignments" ? [] : findTimelineProjects()
   ]);
 
   const allItems = [
@@ -126,6 +128,20 @@ export default async function TimelinePage({
         start: item.startDate ?? item.createdAt,
         end: item.dueDate ?? item.createdAt,
         href: `/tasks?edit=${item.id}`
+      })),
+    ...projects
+      .filter((project) => project.startDate && (project.completedAt || project.targetDate))
+      .map((item) => ({
+        id: item.id,
+        group: "Projects",
+        type: "project",
+        category: item.type,
+        title: item.title,
+        status: item.status,
+        priority: item.priority,
+        start: item.startDate ?? item.createdAt,
+        end: item.completedAt ?? item.targetDate ?? item.startDate ?? item.createdAt,
+        href: `/projects?edit=${item.id}`
       }))
   ].filter((item) => (params.status ? item.status === params.status : true));
 
@@ -144,7 +160,13 @@ export default async function TimelinePage({
   const todayInRange = today >= visibleStart && today <= visibleEnd;
   const todayLeft = todayInRange ? (daysBetween(visibleStart, today) / totalDays) * 100 : 0;
   const filterSummary = [
-    params.type === "tasks" ? "Tasks" : params.type === "assignments" ? "Assignments" : "Tasks + Assignments",
+    params.type === "tasks"
+      ? "Tasks"
+      : params.type === "assignments"
+        ? "Assignments"
+        : params.type === "projects"
+          ? "Projects"
+          : "Tasks + Assignments + Projects",
     params.status ? statusLabel(params.status) : "All statuses",
     range === "all" ? "All dates" : range === "this_week" ? "This week" : "This month"
   ].join(" · ");
@@ -183,6 +205,7 @@ export default async function TimelinePage({
           <option value="">All types</option>
           <option value="assignments">Assignments</option>
           <option value="tasks">Tasks</option>
+          <option value="projects">Projects</option>
         </Select>
         <Select name="status" defaultValue={params.status ?? ""}>
           <option value="">All statuses</option>
@@ -192,6 +215,10 @@ export default async function TimelinePage({
           <option value="doing">Doing</option>
           <option value="done">Done</option>
           <option value="submitted">Submitted</option>
+          <option value="developing">Developing</option>
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="completed">Completed</option>
         </Select>
         <Select name="range" defaultValue={range}>
           <option value="this_week">This week</option>
@@ -213,11 +240,12 @@ export default async function TimelinePage({
             <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
               <p className="font-medium">No timeline items for this period.</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Create a task with a due date or an assignment with a deadline to see it here.
+                Create a task, assignment, or dated project to see it here.
               </p>
               <div className="mt-4 flex justify-center gap-2">
                 <Button asChild variant="secondary"><Link href="/tasks">Create Task</Link></Button>
                 <Button asChild><Link href="/assignments">Create Assignment</Link></Button>
+                <Button asChild variant="outline"><Link href="/projects">Create Project</Link></Button>
               </div>
             </div>
           ) : (
@@ -230,7 +258,7 @@ export default async function TimelinePage({
                   ))}
                 </div>
               </div>
-              {["Assignments", "Tasks"].map((group) => {
+              {["Assignments", "Tasks", "Projects"].map((group) => {
                 const groupItems = items.filter((item) => item.group === group);
                 return (
                   <section key={group} className="mb-7 last:mb-0">
@@ -246,7 +274,9 @@ export default async function TimelinePage({
                           const continuesAfter = item.end > visibleEnd;
                           const left = Math.max(0, (daysBetween(visibleStart, clampedStart) / totalDays) * 100);
                           const width = Math.max(3, ((daysBetween(clampedStart, clampedEnd) + 1) / totalDays) * 100);
-                          const overdue = !["done", "submitted", "graded", "cancelled"].includes(item.status) && isBeforeToday(item.end);
+                          const overdue =
+                            !["done", "submitted", "graded", "cancelled", "completed", "archived", "abandoned"].includes(item.status) &&
+                            isBeforeToday(item.end);
                           return (
                             <div key={`${item.type}-${item.id}`} className="grid grid-cols-[280px_1fr] items-center gap-5 rounded-md border bg-card p-3">
                               <div>

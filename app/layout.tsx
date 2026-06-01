@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarDays, CheckSquare, Clock3, FileText, Home, ListTodo, Settings } from "lucide-react";
+import { CalendarDays, CheckSquare, Clock3, FileText, FolderKanban, Home, ListTodo, Settings } from "lucide-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
@@ -14,6 +14,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/assignments", label: "Assignments", icon: ListTodo },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/notes", label: "Notes", icon: FileText },
   { href: "/timeline", label: "Timeline", icon: Clock3 },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },

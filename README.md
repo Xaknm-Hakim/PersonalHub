@@ -1,6 +1,6 @@
 # PersonalHub
 
-PersonalHub is a local-first personal productivity web app for notes, assignments, tasks, deadlines, and simple timeline planning. It is designed for personal localhost usage, not as a SaaS product.
+PersonalHub is a local-first personal productivity web app for notes, assignments, tasks, projects, deadlines, and simple timeline planning. It is designed for personal localhost usage, not as a SaaS product.
 
 ## Tech stack
 
@@ -27,6 +27,22 @@ npm run prisma:seed
 The SQLite database is stored at `./data/personalhub.db`. Prisma uses `DATABASE_URL="file:../data/personalhub.db"` because SQLite paths are resolved relative to `prisma/schema.prisma`.
 
 Assignments use a practical `type` field such as assignment, exercise, lab, quiz, project, revision, or other. Weight and marks are intentionally not part of the MVP data model.
+
+Projects are a private project memory and control panel. They track personal, technical, academic, operations, and lab-style projects without GitHub integration, team workflow, Kanban boards, file uploads, or automatic local folder scanning.
+
+Project statuses:
+
+- `planned`: accepted idea, not started yet
+- `developing`: actively being built
+- `active`: usable, maintained, or currently running
+- `paused`: temporarily stopped, may continue later
+- `completed`: finished its intended scope
+- `archived`: preserved for reference, no longer active
+- `abandoned`: intentionally dropped
+
+Project types are `software`, `infrastructure`, `networking`, `cloud`, `academic`, `event_ops`, `lab`, `documentation`, and `other`.
+
+The Dashboard shows a small Projects section with developing/active projects, paused count, recently updated projects, and next actions. Timeline shows projects only when `startDate` exists and either `targetDate` or `completedAt` exists. Calendar shows project target and completed milestones only, not full project duration bars.
 
 ## Development
 

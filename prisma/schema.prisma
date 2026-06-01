@@ -38,6 +38,28 @@ model Assignment {
   tags        Tag[]            @relation("AssignmentTags")
 }
 
+model Project {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  status          String   @default("planned")
+  type            String   @default("other")
+  priority        String   @default("medium")
+  startDate       DateTime?
+  targetDate      DateTime?
+  completedAt     DateTime?
+  repositoryUrl   String?
+  localPath       String?
+  liveUrl         String?
+  techStack       String?
+  objective       String?
+  currentProgress String?
+  nextAction      String?
+  lessonsLearned  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Note {
   id                 String      @id @default(cuid())
   title              String
