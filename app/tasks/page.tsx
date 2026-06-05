@@ -31,7 +31,7 @@ export default async function TasksPage({
     <>
       <PageHeader title="Tasks" description="Track personal work, study errands, and practical deadlines." />
       <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
-        <TaskForm mode={editing ? "Edit task" : "Create task"} task={editing} />
+        <TaskForm key={editing?.id ?? "new-task"} mode={editing ? "Edit task" : "Create task"} task={editing} />
         <section>
           <form className="mb-4 grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-[1fr_1fr_auto]">
             <Select name="status" defaultValue={params.status ?? ""}>

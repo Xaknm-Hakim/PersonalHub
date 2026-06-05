@@ -37,7 +37,7 @@ export default async function ProjectsPage({
         description="Private memory and control panel for personal, technical, academic, operations, and lab projects."
       />
       <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
-        <ProjectForm mode={editing ? "Edit project" : "Create project"} project={editing} />
+        <ProjectForm key={editing?.id ?? "new-project"} mode={editing ? "Edit project" : "Create project"} project={editing} />
         <section>
           <form className="mb-4 grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-5">
             <Select name="status" defaultValue={params.status ?? ""}>

@@ -40,7 +40,7 @@ export default async function NotesPage({
     <>
       <PageHeader title="Notes" description="Keep study notes, ideas, and references linked to work when useful." />
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <NoteForm note={editing} tasks={tasks} assignments={assignments} />
+        <NoteForm key={editing?.id ?? "new-note"} note={editing} tasks={tasks} assignments={assignments} />
         <section>
           <form className="mb-4 grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-[1fr_auto]">
             <Input name="q" placeholder="Search title or body" defaultValue={params.q ?? ""} />

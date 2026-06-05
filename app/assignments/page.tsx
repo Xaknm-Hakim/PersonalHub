@@ -34,7 +34,7 @@ export default async function AssignmentsPage({
     <>
       <PageHeader title="Assignments" description="Plan coursework, exercises, labs, projects, and deadlines." />
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <AssignmentForm mode={editing ? "Edit assignment" : "Create assignment"} assignment={editing} />
+        <AssignmentForm key={editing?.id ?? "new-assignment"} mode={editing ? "Edit assignment" : "Create assignment"} assignment={editing} />
         <section>
           <form className="mb-4 grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-5">
             <Select name="course" defaultValue={params.course ?? ""}>
