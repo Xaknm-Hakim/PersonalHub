@@ -16,12 +16,28 @@ export function formatDate(date?: Date | string | null) {
 
 export function dateInputValue(date?: Date | string | null) {
   if (!date) return "";
-  return new Date(date).toISOString().slice(0, 10);
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function parseOptionalDate(value: FormDataEntryValue | null) {
-  if (!value || String(value).trim() === "") return null;
-  return new Date(`${String(value)}T00:00:00`);
+  const text = value ? String(value).trim() : "";
+  if (!text) return null;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) {
+    throw new Error(`Invalid date value: ${text}`);
+  }
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
 }
 
 export function isBeforeToday(date?: Date | null) {

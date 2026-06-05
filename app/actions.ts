@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { assignmentStatuses, assignmentTypes, priorities, projectStatuses, projectTypes, taskStatuses } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { parseOptionalDate } from "@/lib/utils";
 
@@ -15,13 +16,43 @@ function optionalText(formData: FormData, key: string) {
   return value || null;
 }
 
+function requiredOption(formData: FormData, key: string, allowedValues: readonly string[], label: string) {
+  const value = text(formData, key);
+  if (!allowedValues.includes(value)) {
+    throw new Error(`Invalid ${label}: ${value || "empty"}`);
+  }
+  return value;
+}
+
+async function optionalExistingTaskId(formData: FormData, key: string) {
+  const value = optionalText(formData, key);
+  if (!value) return null;
+
+  const exists = await prisma.task.count({ where: { id: value } });
+  if (!exists) {
+    throw new Error(`Invalid linked task: ${value}`);
+  }
+  return value;
+}
+
+async function optionalExistingAssignmentId(formData: FormData, key: string) {
+  const value = optionalText(formData, key);
+  if (!value) return null;
+
+  const exists = await prisma.assignment.count({ where: { id: value } });
+  if (!exists) {
+    throw new Error(`Invalid linked assignment: ${value}`);
+  }
+  return value;
+}
+
 export async function createTask(formData: FormData) {
   await prisma.task.create({
     data: {
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      status: text(formData, "status"),
-      priority: text(formData, "priority"),
+      status: requiredOption(formData, "status", taskStatuses, "task status"),
+      priority: requiredOption(formData, "priority", priorities, "task priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       dueDate: parseOptionalDate(formData.get("dueDate"))
     }
@@ -36,8 +67,8 @@ export async function updateTask(formData: FormData) {
     data: {
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      status: text(formData, "status"),
-      priority: text(formData, "priority"),
+      status: requiredOption(formData, "status", taskStatuses, "task status"),
+      priority: requiredOption(formData, "priority", priorities, "task priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       dueDate: parseOptionalDate(formData.get("dueDate"))
     }
@@ -59,9 +90,9 @@ export async function createAssignment(formData: FormData) {
       courseName: text(formData, "courseName"),
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      type: text(formData, "type") || "assignment",
-      status: text(formData, "status"),
-      priority: text(formData, "priority"),
+      type: requiredOption(formData, "type", assignmentTypes, "assignment type"),
+      status: requiredOption(formData, "status", assignmentStatuses, "assignment status"),
+      priority: requiredOption(formData, "priority", priorities, "assignment priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       deadline: parseOptionalDate(formData.get("deadline")) ?? new Date()
     }
@@ -78,9 +109,9 @@ export async function updateAssignment(formData: FormData) {
       courseName: text(formData, "courseName"),
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      type: text(formData, "type") || "assignment",
-      status: text(formData, "status"),
-      priority: text(formData, "priority"),
+      type: requiredOption(formData, "type", assignmentTypes, "assignment type"),
+      status: requiredOption(formData, "status", assignmentStatuses, "assignment status"),
+      priority: requiredOption(formData, "priority", priorities, "assignment priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       deadline: parseOptionalDate(formData.get("deadline")) ?? new Date()
     }
@@ -100,9 +131,9 @@ export async function createProject(formData: FormData) {
     data: {
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      status: text(formData, "status") || "planned",
-      type: text(formData, "type") || "other",
-      priority: text(formData, "priority") || "medium",
+      status: requiredOption(formData, "status", projectStatuses, "project status"),
+      type: requiredOption(formData, "type", projectTypes, "project type"),
+      priority: requiredOption(formData, "priority", priorities, "project priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       targetDate: parseOptionalDate(formData.get("targetDate")),
       completedAt: parseOptionalDate(formData.get("completedAt")),
@@ -128,9 +159,9 @@ export async function updateProject(formData: FormData) {
     data: {
       title: text(formData, "title"),
       description: optionalText(formData, "description"),
-      status: text(formData, "status") || "planned",
-      type: text(formData, "type") || "other",
-      priority: text(formData, "priority") || "medium",
+      status: requiredOption(formData, "status", projectStatuses, "project status"),
+      type: requiredOption(formData, "type", projectTypes, "project type"),
+      priority: requiredOption(formData, "priority", priorities, "project priority"),
       startDate: parseOptionalDate(formData.get("startDate")),
       targetDate: parseOptionalDate(formData.get("targetDate")),
       completedAt: parseOptionalDate(formData.get("completedAt")),
@@ -160,8 +191,10 @@ export async function deleteProject(formData: FormData) {
 }
 
 export async function createNote(formData: FormData) {
-  const linkedTaskId = optionalText(formData, "linkedTaskId");
-  const linkedAssignmentId = optionalText(formData, "linkedAssignmentId");
+  const [linkedTaskId, linkedAssignmentId] = await Promise.all([
+    optionalExistingTaskId(formData, "linkedTaskId"),
+    optionalExistingAssignmentId(formData, "linkedAssignmentId")
+  ]);
   await prisma.note.create({
     data: {
       title: text(formData, "title"),
@@ -175,13 +208,17 @@ export async function createNote(formData: FormData) {
 }
 
 export async function updateNote(formData: FormData) {
+  const [linkedTaskId, linkedAssignmentId] = await Promise.all([
+    optionalExistingTaskId(formData, "linkedTaskId"),
+    optionalExistingAssignmentId(formData, "linkedAssignmentId")
+  ]);
   await prisma.note.update({
     where: { id: text(formData, "id") },
     data: {
       title: text(formData, "title"),
       body: text(formData, "body"),
-      linkedTaskId: optionalText(formData, "linkedTaskId"),
-      linkedAssignmentId: optionalText(formData, "linkedAssignmentId")
+      linkedTaskId,
+      linkedAssignmentId
     }
   });
   revalidatePath("/notes");
