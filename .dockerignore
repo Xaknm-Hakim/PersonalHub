@@ -1,10 +1,16 @@
 node_modules
 .next
 .git
-.env
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
+.env*
+**/.env*
+# Local data, recovery material, and generated reports must never enter an image.
+data/
+**/data/
+backup/
+backups/
+**/backup/
+**/backups/
+reports/
+**/reports/
 npm-debug.log*
 .DS_Store

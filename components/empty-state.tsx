@@ -1,4 +1,10 @@
-export function EmptyState({ title, message }: { title: string; message: string }) {
+export function EmptyState({
+  title,
+  message
+}: {
+  title: string;
+  message: string;
+}) {
   return (
     <div className="rounded-lg border border-dashed bg-muted/30 p-6 text-center">
       <p className="font-medium">{title}</p>

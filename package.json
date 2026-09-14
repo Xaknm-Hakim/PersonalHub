@@ -3,20 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "dotenv -e .env.overhaul -- ./scripts/with-overhaul-env.sh next dev",
+    "build": "dotenv -e .env.overhaul -- ./scripts/with-overhaul-env.sh next build",
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts",
-    "db:backup": "./scripts/backup-db.sh",
-    "db:restore": "./scripts/restore-db.sh",
-    "docker:backup": "./scripts/backup-db.sh",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d --build",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "format": "prettier --write --ignore-unknown .",
+    "format:check": "prettier --check --ignore-unknown .",
+    "typecheck": "tsc --noEmit --incremental false",
+    "prisma:generate": "dotenv -e .env.overhaul -- ./scripts/with-overhaul-env.sh prisma generate",
+    "prisma:validate": "dotenv -e .env.overhaul -- ./scripts/with-overhaul-env.sh prisma validate",
+    "prisma:migrate": "dotenv -e .env.overhaul -- ./scripts/with-overhaul-env.sh prisma migrate dev",
+    "db:backup": "dotenv -e .env.overhaul -- ./scripts/backup-pg.sh",
+    "db:restore": "dotenv -e .env.overhaul -- ./scripts/restore-pg.sh",
+    "docker:build": "docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml build",
+    "docker:up": "docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml up -d --build",
+    "docker:down": "docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml down",
+    "docker:logs": "docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml logs -f",
+    "test": "vitest run",
+    "test:integration": "tsx scripts/test-integration.ts",
+    "test:browser": "tsx scripts/test-browser.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -24,26 +29,29 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
-    "next": "^15.0.3",
+    "next": "^16.3.5",
+    "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^2.5.5"
+    "tailwind-merge": "^2.5.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
+    "dotenv-cli": "^8.0.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.0.3",
+    "playwright": "^1.63.0",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.16",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
   }
 }

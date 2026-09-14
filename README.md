@@ -4,13 +4,13 @@ PersonalHub is a local-first personal productivity web app for notes, assignment
 
 ## Tech stack
 
-- Next.js App Router
+- Next.js 16 App Router
 - TypeScript
 - Tailwind CSS
 - shadcn/ui-style local components
 - Class-based light/dark mode
 - Prisma ORM
-- SQLite
+- PostgreSQL 16 (isolated local Compose stack)
 - npm
 - ESLint / Prettier
 
@@ -18,13 +18,12 @@ PersonalHub is a local-first personal productivity web app for notes, assignment
 
 ```bash
 npm install
-cp .env.example .env
+./scripts/setup-overhaul-env.sh
 npm run prisma:generate
-npm run prisma:migrate -- --name init
-npm run prisma:seed
+npm run docker:up
 ```
 
-The SQLite database is stored at `./data/personalhub.db`. Prisma uses `DATABASE_URL="file:../data/personalhub.db"` because SQLite paths are resolved relative to `prisma/schema.prisma`.
+The setup script creates `.env.overhaul` once with a random URL-safe password and the matching `PERSONALHUB_DATABASE_URL`; it refuses to overwrite an existing file. The canonical local app is `http://127.0.0.1:3002`; PostgreSQL is bound only to `127.0.0.1:5433`. The legacy SQLite application on port 3001 and its protected snapshots are deliberately separate and are not used, stopped, or changed by overhaul commands.
 
 Assignments use a practical `type` field such as assignment, exercise, lab, quiz, project, revision, or other. Weight and marks are intentionally not part of the MVP data model.
 
@@ -50,7 +49,7 @@ The Dashboard shows a small Projects section with developing/active projects, pa
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000` for development, or use the Compose app at `http://127.0.0.1:3002`.
 
 The theme toggle in the main navigation switches between light and dark mode. The selected theme is saved in `localStorage`; without a saved choice, the app follows the system preference.
 
@@ -65,20 +64,20 @@ make check
 make docker-up
 make docker-logs
 make db-backup
-make db-restore BACKUP=./backups/personalhub-example.db
+make db-restore BACKUP=./backups/postgres/personalhub-example.dump
 make status
 ```
 
-Docker mode is intended for daily local usage at `http://localhost:3001`. npm dev mode is intended for development work at `http://localhost:3000`.
+Docker mode is intended for daily local usage at `http://127.0.0.1:3002`. npm dev mode is intended for development work at `http://localhost:3000`.
 
 ## Docker local usage
 
-Docker runs PersonalHub in production mode for daily localhost usage. The container listens on port `3000`, and Docker Compose exposes it on host port `3001`.
+Docker runs PersonalHub in production mode with a PostgreSQL health check. The container listens on port `3000`, and the isolated Compose project exposes it on host port `3002`.
 
 ```bash
-docker compose up -d --build
-docker compose logs -f
-docker compose down
+docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml up -d --build
+docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml logs -f
+docker compose --env-file .env.overhaul -f docker-compose.overhaul.yml down
 ```
 
 Equivalent npm helpers:
@@ -90,30 +89,28 @@ npm run docker:logs
 npm run docker:down
 ```
 
-The compose file bind-mounts `./data` to `/app/data`, so SQLite persists on the host at `./data/personalhub.db`. Container startup runs `prisma migrate deploy` before `npm start`. It does not seed or delete existing data.
+Compose uses an isolated named PostgreSQL volume and `restart: unless-stopped` for both services. Container startup runs `prisma migrate deploy` before `npm start`; it never runs seeds or SQLite commands.
 
 ## Local database backups
 
-Create a timestamped local backup of `./data/personalhub.db`:
+Create a timestamped PostgreSQL backup:
 
 ```bash
 npm run db:backup
 ```
 
-This writes a file like `./backups/personalhub-YYYY-MM-DD-HHMMSS.db`. Backup database files are ignored by Git.
+This writes a `pg_dump` archive under `./backups/`. Backup archives are ignored by Git.
 
 Restore from a backup:
 
 ```bash
-npm run db:restore -- ./backups/personalhub-example.db
+npm run db:restore -- ./backups/postgres/personalhub-example.dump
 ```
 
-The restore script checks that the backup exists, asks you to type `YES`, and creates a safety backup of the current database before overwriting `./data/personalhub.db`. Stop the Docker container first if the app is actively writing to the database:
+The restore script validates the archive, requires `RESTORE personalhub`, creates a verified safety dump, then replaces only the isolated overhaul database. It stops and restarts the overhaul app only when that app was already running; it never addresses the legacy stack. Use a disposable database for rehearsal and do not restore over a populated database unless you explicitly intend that replacement.
 
 ```bash
-npm run docker:down
-npm run db:restore -- ./backups/personalhub-example.db
-npm run docker:up
+npm run db:restore -- ./backups/postgres/personalhub-example.dump
 ```
 
 Backups are local files. Copy important backups to external storage sometimes so they are not lost with the laptop or project folder.
@@ -122,13 +119,44 @@ Backups are local files. Copy important backups to external storage sometimes so
 
 ```bash
 npm run lint
+npm run format:check
+npm run typecheck
 npm run build
+npm test
+npm run test:integration
+npm run test:browser
 ```
+
+`npm test` excludes integration files. The integration and browser runners create and remove their own loopback-bound temporary PostgreSQL containers, reject normal database configuration, and must not fall back to any configured local database. Browser smoke builds and starts the production application on an ephemeral loopback port.
+
+## Product and API
+
+Quick capture accepts just a task title (and optionally a due date). Detailed task, assignment, project, and note forms validate server-side, support tags, and link tasks/notes to projects. Tags are managed at `/tags` and can filter tasks and notes.
+
+The local API is designed for future local clients and returns `{ "data": ... }` or `{ "error": { "code", "message", "fields" } }`:
+
+```bash
+curl http://127.0.0.1:3002/api/v1/today
+curl -X POST http://127.0.0.1:3002/api/v1/capture -H 'content-type: application/json' -d '{"title":"Call dentist","dueDate":"2026-09-12"}'
+```
+
+Planning dates use validated `YYYY-MM-DD` values and are persisted as PostgreSQL date values at UTC midnight; dates are not client-local instants. Closed status semantics are shared by task, assignment, dashboard, calendar, and timeline queries.
 
 ## Database commands
 
 ```bash
 npm run prisma:generate
-npm run prisma:migrate -- --name init
-npm run prisma:seed
+npm run prisma:validate
+npm run prisma:migrate -- --name add_change_name
 ```
+
+The archived seed file is intentionally not wired to an npm or Make command. Do not run it against a working database.
+
+## Reference contracts
+
+- [API contract](./docs/API.md)
+- [Domain contract](./docs/DOMAIN.md)
+- [Testing and isolation rules](./docs/TESTING.md)
+- [Manual acceptance checks](./docs/ACCEPTANCE_TESTS.md)
+- [Product scope](./docs/PRODUCT_SPEC.md)
+- [Overhaul constraints and handoff](./docs/OVERHAUL-REPORT.md)

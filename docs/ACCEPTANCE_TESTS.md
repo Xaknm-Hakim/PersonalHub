@@ -1,5 +1,7 @@
 # Acceptance Tests
 
+> Run against `http://127.0.0.1:3002` after `npm run docker:up`. Also verify quick capture, task project/tag links, note project link, a visible project task, a tag filter, and `/api/v1/today`.
+
 ## Manual test cases
 
 - Can create, edit, and delete a task.
@@ -23,5 +25,6 @@
 - Calendar shows project target and completed milestone items.
 - Calendar previous month, next month, and today controls work.
 - Filters work on tasks, assignments, projects, and timeline.
-- App builds successfully.
-- Docker still runs.
+- `npm run typecheck`, `npm run lint`, `npm run format:check`, and `npm test` complete before release review.
+- `npm run test:integration` completes with its disposable PostgreSQL container; it must not connect to the Compose or legacy database.
+- The isolated Compose app and PostgreSQL services report healthy at `http://127.0.0.1:3002` and `127.0.0.1:5433`.

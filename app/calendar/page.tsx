@@ -1,127 +1,137 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { prisma } from "@/lib/prisma";
-import { findProjectCompletionsBetween, findProjectTargetsBetween } from "@/lib/projects";
-import { isBeforeToday, statusLabel } from "@/lib/utils";
+import { Select } from "@/components/ui/select";
+import { calendarItems } from "@/features/calendar/service";
+import {
+  addDays,
+  addMonths,
+  dateOnly,
+  todayDateOnly
+} from "@/lib/domain/dates";
+import { parsePlanningMonth } from "@/features/planning/semantics";
 
 export const dynamic = "force-dynamic";
-
-function monthParam(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function selectedMonthFromParam(month?: string) {
-  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
-  }
-
-  const [year, monthNumber] = month.split("-").map(Number);
-  if (monthNumber < 1 || monthNumber > 12) {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
-  }
-
-  return new Date(year, monthNumber - 1, 1);
+type Params = { month?: string; type?: string; status?: string };
+const monthKey = (date: Date) => date.toISOString().slice(0, 7);
+function href(params: Params, update: Partial<Params>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries({ ...params, ...update }))
+    if (value) search.set(key, value);
+  return `/calendar?${search}`;
 }
 
 export default async function CalendarPage({
   searchParams
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<Params>;
 }) {
   const params = await searchParams;
-  const today = new Date();
-  const monthStart = selectedMonthFromParam(params.month);
-  const selectedMonthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
-  const gridStart = new Date(monthStart);
-  gridStart.setDate(monthStart.getDate() - monthStart.getDay());
-  const gridDays = Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(gridStart);
-    date.setDate(gridStart.getDate() + index);
-    return date;
-  });
-  const gridEnd = new Date(gridDays[gridDays.length - 1]);
-  gridEnd.setHours(23, 59, 59, 999);
-  const previousMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1);
-  const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
-  const selectedMonthLabel = monthStart.toLocaleDateString("en-MY", { month: "long", year: "numeric" });
-  const [tasks, assignments, targetProjects, completedProjects] = await Promise.all([
-    prisma.task.findMany({ where: { dueDate: { gte: gridStart, lte: gridEnd } } }),
-    prisma.assignment.findMany({ where: { deadline: { gte: gridStart, lte: gridEnd } } }),
-    findProjectTargetsBetween(gridStart, gridEnd),
-    findProjectCompletionsBetween(gridStart, gridEnd)
-  ]);
-  const events = [
-    ...tasks.map((task) => ({ id: task.id, date: task.dueDate, title: task.title, href: `/tasks?edit=${task.id}`, kind: "Task", overdue: task.status !== "done" && task.status !== "cancelled" && isBeforeToday(task.dueDate) })),
-    ...assignments.map((assignment) => ({ id: assignment.id, date: assignment.deadline, title: assignment.title, href: `/assignments?edit=${assignment.id}`, kind: statusLabel(assignment.type), overdue: !["submitted", "graded", "cancelled"].includes(assignment.status) && isBeforeToday(assignment.deadline) })),
-    ...targetProjects.map((project) => ({ id: `${project.id}-target`, date: project.targetDate, title: project.title, href: `/projects?edit=${project.id}`, kind: "Project target", overdue: !["completed", "archived", "abandoned"].includes(project.status) && isBeforeToday(project.targetDate) })),
-    ...completedProjects.map((project) => ({ id: `${project.id}-completed`, date: project.completedAt, title: project.title, href: `/projects?edit=${project.id}`, kind: "Project completed", overdue: false }))
-  ];
-
+  const today = todayDateOnly();
+  const monthStart =
+    parsePlanningMonth(params.month) ??
+    new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const gridStart = addDays(monthStart, -monthStart.getUTCDay());
+  const gridDays = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const gridEnd = gridDays.at(-1)!;
+  const events = await calendarItems(gridStart, gridEnd, params);
+  const label = new Intl.DateTimeFormat("en-MY", {
+    timeZone: "UTC",
+    month: "long",
+    year: "numeric"
+  }).format(monthStart);
   return (
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-normal">Calendar</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{selectedMonthLabel}</p>
+          <h1 className="text-2xl font-semibold">Calendar</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{label}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2">
           <Button asChild variant="outline">
-            <Link href={`/calendar?month=${monthParam(previousMonth)}`}>Previous Month</Link>
+            <Link
+              href={href(params, {
+                month: monthKey(addMonths(monthStart, -1))
+              })}
+            >
+              Previous
+            </Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link href={`/calendar?month=${monthParam(new Date(today.getFullYear(), today.getMonth(), 1))}`}>Today</Link>
+            <Link href={href(params, { month: monthKey(today) })}>Today</Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href={`/calendar?month=${monthParam(nextMonth)}`}>Next Month</Link>
+            <Link
+              href={href(params, { month: monthKey(addMonths(monthStart, 1)) })}
+            >
+              Next
+            </Link>
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-7 overflow-hidden rounded-lg border bg-card text-sm">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-          <div key={day} className="border-b bg-muted/40 p-3 font-medium text-muted-foreground">{day}</div>
-        ))}
-        {gridDays.map((day) => {
-          const dayEvents = events.filter((event) => event.date && event.date.toDateString() === day.toDateString());
-          const isToday = day.toDateString() === today.toDateString();
-          const inMonth = day >= monthStart && day <= selectedMonthEnd;
-          return (
+      <form className="mb-4 flex flex-wrap gap-2 rounded-lg border bg-card p-3">
+        <input type="hidden" name="month" value={monthKey(monthStart)} />
+        <Select name="type" defaultValue={params.type ?? ""}>
+          <option value="">All types</option>
+          <option value="task">Tasks</option>
+          <option value="assignment">Assignments</option>
+          <option value="project">Projects</option>
+        </Select>
+        <Select name="status" defaultValue={params.status ?? ""}>
+          <option value="">All statuses</option>
+          <option value="todo">Todo</option>
+          <option value="doing">Doing</option>
+          <option value="not_started">Not started</option>
+          <option value="in_progress">In progress</option>
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="completed">Completed</option>
+        </Select>
+        <Button variant="secondary">Apply</Button>
+      </form>
+      <div className="overflow-x-auto rounded-lg border">
+        <div className="grid min-w-[760px] grid-cols-7 bg-card text-sm">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div
-              key={day.toISOString()}
-              className={
-                isToday
-                  ? "min-h-32 border-b border-r bg-amber-50 p-2 dark:bg-amber-950/50"
-                  : inMonth
-                    ? "min-h-32 border-b border-r bg-card p-2"
-                    : "min-h-32 border-b border-r bg-muted/20 p-2"
-              }
+              key={d}
+              className="border-b bg-muted/40 p-3 font-medium text-muted-foreground"
             >
-              <div className={inMonth ? "font-medium" : "text-muted-foreground"}>{day.getDate()}</div>
-              <div className="mt-2 space-y-1">
-                {dayEvents.map((event) => (
-                  <Link
-                    key={`${event.kind}-${event.id}`}
-                    href={event.href}
-                    className={
-                      event.overdue
-                        ? inMonth
-                          ? "block rounded-md border border-red-100 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:text-red-200 dark:hover:bg-red-900/70"
-                          : "block rounded-md border border-red-100 bg-red-50/60 px-2 py-1 text-xs text-red-700/70 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200/70 dark:hover:bg-red-900/60"
-                        : inMonth
-                          ? "block rounded-md border border-teal-100 bg-teal-50 px-2 py-1 text-xs text-teal-800 hover:bg-teal-100 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-200 dark:hover:bg-teal-900/70"
-                          : "block rounded-md border border-teal-100 bg-teal-50/60 px-2 py-1 text-xs text-teal-800/70 hover:bg-teal-100 dark:border-teal-900 dark:bg-teal-950/50 dark:text-teal-200/70 dark:hover:bg-teal-900/60"
-                    }
-                  >
-                    <Badge className="mr-1 bg-background/80">{event.kind}</Badge>
-                    {event.title}
-                  </Link>
-                ))}
-              </div>
+              {d}
             </div>
-          );
-        })}
+          ))}
+          {gridDays.map((day) => {
+            const key = dateOnly(day)!;
+            const entries = events.filter((event) => event.date === key);
+            const inMonth = day.getUTCMonth() === monthStart.getUTCMonth();
+            const isToday = key === dateOnly(today);
+            return (
+              <div
+                key={key}
+                className={`min-h-32 border-b border-r p-2 ${isToday ? "bg-amber-50 dark:bg-amber-950/50" : inMonth ? "bg-card" : "bg-muted/20"}`}
+              >
+                <p
+                  className={inMonth ? "font-medium" : "text-muted-foreground"}
+                >
+                  {day.getUTCDate()}
+                </p>
+                <div className="mt-2 space-y-1">
+                  {entries.map((entry) => (
+                    <Link
+                      key={`${entry.entity}-${entry.id}`}
+                      href={entry.href}
+                      className={`block rounded border px-2 py-1 text-xs ${entry.overdue ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200" : "border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-200"}`}
+                    >
+                      <Badge className="mr-1 bg-background/80">
+                        {entry.event === "target" ? "Target" : entry.entity}
+                      </Badge>
+                      {entry.title}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </>
   );

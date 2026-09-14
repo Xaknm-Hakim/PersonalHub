@@ -12,8 +12,16 @@ export type ProjectFilters = {
 };
 
 function projectOrder(sort?: string): Prisma.ProjectOrderByWithRelationInput[] {
-  if (sort === "start_date") return [{ startDate: { sort: "asc", nulls: "last" } }, { updatedAt: "desc" }];
-  if (sort === "target_date") return [{ targetDate: { sort: "asc", nulls: "last" } }, { updatedAt: "desc" }];
+  if (sort === "start_date")
+    return [
+      { startDate: { sort: "asc", nulls: "last" } },
+      { updatedAt: "desc" }
+    ];
+  if (sort === "target_date")
+    return [
+      { targetDate: { sort: "asc", nulls: "last" } },
+      { updatedAt: "desc" }
+    ];
   if (sort === "title") return [{ title: "asc" }];
   return [{ updatedAt: "desc" }];
 }
@@ -49,9 +57,13 @@ export function findTimelineProjects() {
 }
 
 export function findProjectTargetsBetween(start: Date, end: Date) {
-  return prisma.project.findMany({ where: { targetDate: { gte: start, lte: end } } });
+  return prisma.project.findMany({
+    where: { targetDate: { gte: start, lte: end } }
+  });
 }
 
 export function findProjectCompletionsBetween(start: Date, end: Date) {
-  return prisma.project.findMany({ where: { completedAt: { gte: start, lte: end } } });
+  return prisma.project.findMany({
+    where: { completedAt: { gte: start, lte: end } }
+  });
 }

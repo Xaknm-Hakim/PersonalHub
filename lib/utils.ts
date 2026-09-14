@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { dateOnly, todayDateOnly } from "@/lib/domain/dates";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -21,10 +22,7 @@ export function dateInputValue(date?: Date | string | null) {
   const value = new Date(date);
   if (Number.isNaN(value.getTime())) return "";
 
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return dateOnly(value) ?? "";
 }
 
 export function parseOptionalDate(value: FormDataEntryValue | null) {
@@ -37,24 +35,31 @@ export function parseOptionalDate(value: FormDataEntryValue | null) {
   }
 
   const [, year, month, day] = match;
-  return new Date(Number(year), Number(month) - 1, Number(day));
+  const result = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day))
+  );
+  if (
+    result.getUTCFullYear() !== Number(year) ||
+    result.getUTCMonth() !== Number(month) - 1 ||
+    result.getUTCDate() !== Number(day)
+  )
+    throw new Error(`Invalid date value: ${text}`);
+  return result;
 }
 
 export function isBeforeToday(date?: Date | null) {
   if (!date) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value < today;
+  return date < todayDateOnly();
 }
 
 export function priorityClass(priority: string) {
   const map: Record<string, string> = {
     low: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
-    medium: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
+    medium:
+      "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
     high: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200",
-    urgent: "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+    urgent:
+      "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
   };
   return map[priority] ?? map.medium;
 }

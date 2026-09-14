@@ -3,83 +3,92 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("PERSONALHUB_DATABASE_URL")
 }
 
+// Planning dates are stored as UTC midnight. They are date-only values, never instants.
 model Task {
-  id          String     @id @default(cuid())
-  title       String
+  id String @id @default(cuid())
+  title String
   description String?
-  status      String     @default("todo")
-  priority    String     @default("medium")
-  startDate   DateTime?
-  dueDate     DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  notes       Note[]
-  tags        Tag[]      @relation("TaskTags")
+  status String @default("todo")
+  priority String @default("medium")
+  startDate DateTime? @db.Date
+  dueDate DateTime? @db.Date
+  completedAt DateTime?
+  projectId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  notes Note[]
+  tags Tag[] @relation("TaskTags")
 }
 
 model Assignment {
-  id          String           @id @default(cuid())
-  courseCode  String
-  courseName  String
-  title       String
+  id String @id @default(cuid())
+  courseCode String
+  courseName String
+  title String
   description String?
-  type        String           @default("assignment")
-  status      String           @default("not_started")
-  priority    String           @default("medium")
-  startDate   DateTime?
-  deadline    DateTime
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  notes       Note[]
-  tags        Tag[]            @relation("AssignmentTags")
+  type String @default("assignment")
+  status String @default("not_started")
+  priority String @default("medium")
+  startDate DateTime? @db.Date
+  deadline DateTime @db.Date
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  notes Note[]
+  tags Tag[] @relation("AssignmentTags")
 }
 
 model Project {
-  id              String   @id @default(cuid())
-  title           String
-  description     String?
-  status          String   @default("planned")
-  type            String   @default("other")
-  priority        String   @default("medium")
-  startDate       DateTime?
-  targetDate      DateTime?
-  completedAt     DateTime?
-  repositoryUrl   String?
-  localPath       String?
-  liveUrl         String?
-  techStack       String?
-  objective       String?
+  id String @id @default(cuid())
+  title String
+  description String?
+  status String @default("planned")
+  type String @default("other")
+  priority String @default("medium")
+  startDate DateTime? @db.Date
+  targetDate DateTime? @db.Date
+  completedAt DateTime?
+  repositoryUrl String?
+  localPath String?
+  liveUrl String?
+  techStack String?
+  objective String?
   currentProgress String?
-  nextAction      String?
-  lessonsLearned  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  nextAction String?
+  lessonsLearned String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks Task[]
+  notes Note[]
 }
 
 model Note {
-  id                 String      @id @default(cuid())
-  title              String
-  body               String
-  linkedTaskId       String?
+  id String @id @default(cuid())
+  title String
+  body String
+  linkedTaskId String?
   linkedAssignmentId String?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
-  linkedTask         Task?       @relation(fields: [linkedTaskId], references: [id], onDelete: SetNull)
-  linkedAssignment   Assignment? @relation(fields: [linkedAssignmentId], references: [id], onDelete: SetNull)
-  tags               Tag[]       @relation("NoteTags")
+  projectId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  linkedTask Task? @relation(fields: [linkedTaskId], references: [id], onDelete: SetNull)
+  linkedAssignment Assignment? @relation(fields: [linkedAssignmentId], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  tags Tag[] @relation("NoteTags")
 }
 
 model Tag {
-  id          String       @id @default(cuid())
-  name        String       @unique
-  color       String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  tasks       Task[]       @relation("TaskTags")
+  id String @id @default(cuid())
+  name String @unique
+  color String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks Task[] @relation("TaskTags")
   assignments Assignment[] @relation("AssignmentTags")
-  notes       Note[]       @relation("NoteTags")
+  notes Note[] @relation("NoteTags")
 }

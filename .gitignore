@@ -2,9 +2,17 @@ node_modules
 .next
 dist
 .env
+.env.overhaul
 data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 backups/*.db
 backups/*.sqlite
+backups/overhaul-safety-*/
+reports/
+backups/postgres/
+*.dump
+*.backup
+*.sql.gz
+*.tsbuildinfo

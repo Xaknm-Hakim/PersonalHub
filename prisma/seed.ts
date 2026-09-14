@@ -85,13 +85,16 @@ async function main() {
       courseCode: "DIT204",
       courseName: "Web Application Development",
       title: "Personal Portfolio Website",
-      description: "Build a responsive portfolio with project cards and contact form.",
+      description:
+        "Build a responsive portfolio with project cards and contact form.",
       type: "project",
       status: "in_progress",
       priority: "urgent",
       startDate: daysFromNow(-5),
       deadline: daysFromNow(3, 23),
-      tags: { connect: [{ id: diploma.id }, { id: programming.id }, { id: urgent.id }] }
+      tags: {
+        connect: [{ id: diploma.id }, { id: programming.id }, { id: urgent.id }]
+      }
     }
   });
 
@@ -124,63 +127,71 @@ async function main() {
 
   const projects = [
     {
-        title: "StudexHub v1",
-        status: "archived",
-        type: "software",
-        priority: "medium",
-        techStack: "Next.js, TypeScript, Prisma, PostgreSQL, Docker, Nginx, Cloudflare Tunnel",
-        description: "Academic/student platform prototype and infrastructure learning project.",
-        startDate: daysFromNow(-180),
-        completedAt: daysFromNow(-90),
-        currentProgress: "Archived after validating the prototype and deployment path.",
-        lessonsLearned: "Learned production-style reverse proxying, container deployment, and tunnel-based access."
+      title: "StudexHub v1",
+      status: "archived",
+      type: "software",
+      priority: "medium",
+      techStack:
+        "Next.js, TypeScript, Prisma, PostgreSQL, Docker, Nginx, Cloudflare Tunnel",
+      description:
+        "Academic/student platform prototype and infrastructure learning project.",
+      startDate: daysFromNow(-180),
+      completedAt: daysFromNow(-90),
+      currentProgress:
+        "Archived after validating the prototype and deployment path.",
+      lessonsLearned:
+        "Learned production-style reverse proxying, container deployment, and tunnel-based access."
     },
     {
-        title: "PersonalHub",
-        status: "developing",
-        type: "software",
-        priority: "high",
-        techStack: "Next.js, TypeScript, Prisma, SQLite, Docker Compose, Tailwind",
-        description: "Private local-first personal operations system.",
-        startDate: daysFromNow(-14),
-        targetDate: daysFromNow(30),
-        objective: "Build a private control panel for tasks, assignments, notes, calendar, timeline, and project memory.",
-        currentProgress: "Core local productivity modules are running.",
-        nextAction: "Keep shaping modules around real daily use."
+      title: "PersonalHub",
+      status: "developing",
+      type: "software",
+      priority: "high",
+      techStack:
+        "Next.js, TypeScript, Prisma, SQLite, Docker Compose, Tailwind",
+      description: "Private local-first personal operations system.",
+      startDate: daysFromNow(-14),
+      targetDate: daysFromNow(30),
+      objective:
+        "Build a private control panel for tasks, assignments, notes, calendar, timeline, and project memory.",
+      currentProgress: "Core local productivity modules are running.",
+      nextAction: "Keep shaping modules around real daily use."
     },
     {
-        title: "Packet Tracer Campus Network Lab",
-        status: "completed",
-        type: "networking",
-        priority: "medium",
-        techStack: "Cisco Packet Tracer, VLAN, OSPF, Inter-VLAN Routing, NAT",
-        description: "Campus-style networking topology lab.",
-        startDate: daysFromNow(-45),
-        completedAt: daysFromNow(-25),
-        currentProgress: "Completed topology and routing validation.",
-        lessonsLearned: "Practiced segmentation, dynamic routing, and edge NAT behavior."
+      title: "Packet Tracer Campus Network Lab",
+      status: "completed",
+      type: "networking",
+      priority: "medium",
+      techStack: "Cisco Packet Tracer, VLAN, OSPF, Inter-VLAN Routing, NAT",
+      description: "Campus-style networking topology lab.",
+      startDate: daysFromNow(-45),
+      completedAt: daysFromNow(-25),
+      currentProgress: "Completed topology and routing validation.",
+      lessonsLearned:
+        "Practiced segmentation, dynamic routing, and edge NAT behavior."
     },
     {
-        title: "Terraform AWS EC2 Lab",
-        status: "planned",
-        type: "cloud",
-        priority: "high",
-        techStack: "Terraform, AWS EC2, VPC, Security Groups",
-        description: "Planned cloud infrastructure automation lab.",
-        targetDate: daysFromNow(45),
-        objective: "Provision a minimal EC2 environment with repeatable infrastructure code.",
-        nextAction: "Draft the Terraform module structure and variable inputs."
+      title: "Terraform AWS EC2 Lab",
+      status: "planned",
+      type: "cloud",
+      priority: "high",
+      techStack: "Terraform, AWS EC2, VPC, Security Groups",
+      description: "Planned cloud infrastructure automation lab.",
+      targetDate: daysFromNow(45),
+      objective:
+        "Provision a minimal EC2 environment with repeatable infrastructure code.",
+      nextAction: "Draft the Terraform module structure and variable inputs."
     },
     {
-        title: "Docker Monitoring Stack",
-        status: "planned",
-        type: "infrastructure",
-        priority: "medium",
-        techStack: "Docker Compose, Prometheus, Grafana, cAdvisor",
-        description: "Planned local monitoring stack for personal services.",
-        targetDate: daysFromNow(60),
-        objective: "Monitor local containers without adding cloud dependencies.",
-        nextAction: "Define compose services and persistent volumes."
+      title: "Docker Monitoring Stack",
+      status: "planned",
+      type: "infrastructure",
+      priority: "medium",
+      techStack: "Docker Compose, Prometheus, Grafana, cAdvisor",
+      description: "Planned local monitoring stack for personal services.",
+      targetDate: daysFromNow(60),
+      objective: "Monitor local containers without adding cloud dependencies.",
+      nextAction: "Define compose services and persistent volumes."
     }
   ];
 
@@ -205,7 +216,9 @@ async function main() {
     ]
   });
 
-  const dbNote = await prisma.note.findFirst({ where: { title: "Database lecture summary" } });
+  const dbNote = await prisma.note.findFirst({
+    where: { title: "Database lecture summary" }
+  });
   if (dbNote) {
     await prisma.note.update({
       where: { id: dbNote.id },

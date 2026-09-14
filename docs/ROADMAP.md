@@ -1,5 +1,7 @@
 # Roadmap
 
+> Current baseline: isolated PostgreSQL Compose runtime, shared validation/services, local task API, tags, and project links are implemented. Next UX work: inline action feedback, deliberate delete dialogs, and browser integration coverage.
+
 ## Version 0.1
 
 - Dashboard

@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { createTask, deleteTask, updateTask } from "@/app/actions";
+import { notFound } from "next/navigation";
+import { completeTaskAction, deleteTaskAction } from "@/app/tasks/actions";
+import { QuickCapture } from "@/components/quick-capture";
+import { DeleteControl } from "@/components/delete-control";
+import { TaskForm } from "@/components/forms/task-form";
+import { MutationForm } from "@/components/mutation-form";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -7,80 +12,156 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { prisma } from "@/lib/prisma";
+import { findTasks, taskById } from "@/features/tasks/service";
+import { findProjects } from "@/features/projects/service";
+import { findTags } from "@/features/tags/service";
 import { priorities, taskStatuses } from "@/lib/constants";
-import { dateInputValue, formatDate, isBeforeToday, priorityClass, statusLabel } from "@/lib/utils";
-
+import { isClosed } from "@/lib/domain/status";
+import {
+  formatDate,
+  isBeforeToday,
+  priorityClass,
+  statusLabel
+} from "@/lib/utils";
 export default async function TasksPage({
   searchParams
 }: {
-  searchParams: Promise<{ status?: string; priority?: string; edit?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    priority?: string;
+    q?: string;
+    tagId?: string;
+    edit?: string;
+  }>;
 }) {
-  const params = await searchParams;
-  const where = {
-    ...(params.status ? { status: params.status } : {}),
-    ...(params.priority ? { priority: params.priority } : {})
-  };
-  const [tasks, editing] = await Promise.all([
-    prisma.task.findMany({ where, orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }] }),
-    params.edit ? prisma.task.findUnique({ where: { id: params.edit } }) : null
+  const p = await searchParams;
+  const [tasks, editing, projects, tags] = await Promise.all([
+    findTasks(p),
+    p.edit ? taskById(p.edit) : null,
+    findProjects(),
+    findTags()
   ]);
-
+  if (p.edit && !editing) notFound();
   return (
     <>
-      <PageHeader title="Tasks" description="Track personal work, study errands, and practical deadlines." />
-      <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
-        <TaskForm key={editing?.id ?? "new-task"} mode={editing ? "Edit task" : "Create task"} task={editing} />
+      <PageHeader
+        title="Tasks"
+        description="Capture work quickly, then add detail only when it helps."
+      />
+      <div className="mb-6">
+        <QuickCapture />
+      </div>
+      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>{editing ? "Edit task" : "Task details"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TaskForm
+              key={editing?.id ?? "new-task"}
+              task={editing}
+              projects={projects}
+              tags={tags}
+            />
+          </CardContent>
+        </Card>
         <section>
-          <form className="mb-4 grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-[1fr_1fr_auto]">
-            <Select name="status" defaultValue={params.status ?? ""}>
+          <form className="mb-4 grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Input
+              name="q"
+              placeholder="Search tasks"
+              defaultValue={p.q ?? ""}
+            />
+            <Select name="status" defaultValue={p.status ?? ""}>
               <option value="">All statuses</option>
-              {taskStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {statusLabel(status)}
+              {taskStatuses.map((s) => (
+                <option key={s} value={s}>
+                  {statusLabel(s)}
                 </option>
               ))}
             </Select>
-            <Select name="priority" defaultValue={params.priority ?? ""}>
+            <Select name="priority" defaultValue={p.priority ?? ""}>
               <option value="">All priorities</option>
-              {priorities.map((priority) => (
-                <option key={priority} value={priority}>
-                  {priority}
+              {priorities.map((x) => (
+                <option key={x} value={x}>
+                  {x}
                 </option>
               ))}
             </Select>
-            <Button type="submit" variant="secondary">Filter</Button>
+            <Select name="tagId" defaultValue={p.tagId ?? ""}>
+              <option value="">All tags</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary">Filter</Button>
           </form>
-          {tasks.length === 0 ? (
-            <EmptyState title="No tasks found" message="Create a task or clear your filters." />
+          {!tasks.length ? (
+            <EmptyState
+              title="No tasks found"
+              message="Capture a task or clear the filters."
+            />
           ) : (
             <div className="space-y-3">
-              {tasks.map((task) => {
-                const overdue = task.status !== "done" && task.status !== "cancelled" && isBeforeToday(task.dueDate);
+              {tasks.map((t) => {
+                const overdue =
+                  !isClosed("task", t.status) && isBeforeToday(t.dueDate);
                 return (
-                  <Card key={task.id} className={overdue ? "border-red-300 dark:border-red-800" : ""}>
+                  <Card
+                    key={t.id}
+                    className={
+                      overdue ? "border-red-300 dark:border-red-800" : ""
+                    }
+                  >
                     <CardContent className="p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex flex-wrap justify-between gap-3">
                         <div>
-                          <Link href={`/tasks?edit=${task.id}`} className="font-medium hover:underline">
-                            {task.title}
+                          <Link
+                            href={`/tasks?edit=${t.id}`}
+                            className="font-medium hover:underline"
+                          >
+                            {t.title}
                           </Link>
-                          <p className="mt-1 text-sm text-muted-foreground">{task.description || "No description"}</p>
-                          <p className={overdue ? "mt-2 text-sm font-medium text-red-600 dark:text-red-300" : "mt-2 text-sm text-muted-foreground"}>
-                            Start {formatDate(task.startDate)} · Due {formatDate(task.dueDate)}
+                          {t.description && (
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {t.description}
+                            </p>
+                          )}
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Due {formatDate(t.dueDate)}
+                            {t.project ? ` · ${t.project.title}` : ""}
                           </p>
+                          {t.tags.length ? (
+                            <div className="mt-2 flex gap-1">
+                              {t.tags.map((x) => (
+                                <Badge key={x.id}>{x.name}</Badge>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Badge>{statusLabel(task.status)}</Badge>
-                          <Badge className={priorityClass(task.priority)}>{task.priority}</Badge>
-                          {overdue ? <Badge className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-200">Overdue</Badge> : null}
+                        <div className="flex gap-2">
+                          <Badge>{statusLabel(t.status)}</Badge>
+                          <Badge className={priorityClass(t.priority)}>
+                            {t.priority}
+                          </Badge>
+                          {overdue && (
+                            <Badge className="text-red-700">Overdue</Badge>
+                          )}
                         </div>
                       </div>
-                      <form action={deleteTask} className="mt-3">
-                        <input type="hidden" name="id" value={task.id} />
-                        <Button type="submit" variant="destructive" size="sm">Delete</Button>
-                      </form>
+                      <div className="mt-3 flex gap-2">
+                        {t.status !== "done" && (
+                          <MutationForm action={completeTaskAction}>
+                            <input type="hidden" name="id" value={t.id} />
+                            <Button size="sm" variant="secondary">
+                              Complete
+                            </Button>
+                          </MutationForm>
+                        )}
+                        <DeleteControl action={deleteTaskAction} id={t.id} />
+                      </div>
                     </CardContent>
                   </Card>
                 );
@@ -90,49 +171,5 @@ export default async function TasksPage({
         </section>
       </div>
     </>
-  );
-}
-
-function TaskForm({ mode, task }: { mode: string; task: Awaited<ReturnType<typeof prisma.task.findUnique>> }) {
-  const action = task ? updateTask : createTask;
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{mode}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form action={action} className="space-y-3">
-          {task ? <input type="hidden" name="id" value={task.id} /> : null}
-          <Input name="title" placeholder="Task title" defaultValue={task?.title ?? ""} required />
-          <Textarea name="description" placeholder="Description" defaultValue={task?.description ?? ""} />
-          <div className="grid grid-cols-2 gap-3">
-            <Select name="status" defaultValue={task?.status ?? "todo"}>
-              {taskStatuses.map((status) => (
-                <option key={status} value={status}>{statusLabel(status)}</option>
-              ))}
-            </Select>
-            <Select name="priority" defaultValue={task?.priority ?? "medium"}>
-              {priorities.map((priority) => (
-                <option key={priority} value={priority}>{priority}</option>
-              ))}
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-sm font-medium">
-              Start date
-              <Input className="mt-1" type="date" name="startDate" defaultValue={dateInputValue(task?.startDate)} />
-            </label>
-            <label className="text-sm font-medium">
-              Due date
-              <Input className="mt-1" type="date" name="dueDate" defaultValue={dateInputValue(task?.dueDate)} />
-            </label>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit">{task ? "Save task" : "Create task"}</Button>
-            {task ? <Button asChild variant="outline"><Link href="/tasks">Cancel</Link></Button> : null}
-          </div>
-        </form>
-      </CardContent>
-    </Card>
   );
 }

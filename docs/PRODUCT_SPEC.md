@@ -1,5 +1,7 @@
 # Product Spec
 
+> Runtime update: PostgreSQL is the canonical datastore. Tasks and notes can belong to projects; tags classify tasks, assignments, and notes. Planning dates are validated `YYYY-MM-DD` calendar dates rather than user-local instants.
+
 ## App purpose
 
 PersonalHub is a local-first productivity app for one person using a laptop browser on localhost. It helps track diploma/student tasks, assignments, notes, private projects, deadlines, calendar dates, and simple Gantt-style planning.
@@ -13,7 +15,7 @@ PersonalHub is a local-first productivity app for one person using a laptop brow
 - Notes CRUD with optional task or assignment links, search, and latest-updated sorting.
 - Timeline with tasks, assignments, and dated projects grouped into a CSS-based horizontal plan.
 - Calendar with month navigation, task due dates, assignment deadlines, and project target/completion milestones.
-- Settings/About page with local-first explanation, database path, and version.
+- Settings/About page with local-first explanation and version.
 - Light/dark mode toggle with local browser persistence.
 
 ## Page descriptions
@@ -25,7 +27,7 @@ PersonalHub is a local-first productivity app for one person using a laptop brow
 - Notes: stores study notes and links them to work items where useful.
 - Timeline: shows assignments, tasks, and projects on a simple horizontal date range.
 - Calendar: shows a navigable monthly view of due dates, deadlines, and project milestones.
-- Settings/About: documents the local-only intent and database location.
+- Settings/About: documents the local-only intent.
 
 ## Data model overview
 
@@ -79,7 +81,6 @@ Calendar integration is milestone-only: `targetDate` appears as a project target
 - Cloud sync
 - AI features
 - Email or Telegram notifications
-- PostgreSQL
 - GitHub API integration
 - Kanban boards
 - Milestones

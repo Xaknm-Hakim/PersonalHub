@@ -3,6 +3,7 @@ FROM node:22-slim AS deps
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PERSONALHUB_DATABASE_URL=postgresql://build:build@localhost:5432/build
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
@@ -16,6 +17,7 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PERSONALHUB_DATABASE_URL=postgresql://build:build@localhost:5432/build
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
@@ -35,8 +37,6 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
-ENV DATABASE_URL=file:../data/personalhub.db
-
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/*
