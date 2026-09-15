@@ -3,8 +3,10 @@ import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
 const baseURL = process.env.PERSONALHUB_BROWSER_URL;
+const ownerPassword = process.env.PERSONALHUB_BROWSER_OWNER_PASSWORD;
 if (!baseURL || !/^http:\/\/127\.0\.0\.1:\d+$/.test(baseURL))
   throw new Error("PERSONALHUB_BROWSER_URL must be an explicit loopback URL.");
+if (!ownerPassword) throw new Error("Browser owner password is required.");
 const modulePath = process.env.PLAYWRIGHT_MODULE;
 const playwrightModule = modulePath
   ? await import(pathToFileURL(modulePath).href)
@@ -17,6 +19,19 @@ const context = await browser.newContext({ baseURL });
 const page = await context.newPage();
 const errors = [];
 const requests = [];
+let capturedServerAction;
+let captureProtectedActions = false;
+page.on("request", (request) => {
+  const actionId = request.headers()["next-action"];
+  const body = request.postDataBuffer();
+  if (captureProtectedActions && !capturedServerAction && actionId && body) {
+    capturedServerAction = {
+      actionId,
+      body,
+      contentType: request.headers()["content-type"]
+    };
+  }
+});
 page.on("console", (message) => {
   if (message.type() === "error") errors.push(`console: ${message.text()}`);
 });
@@ -57,9 +72,17 @@ const projectTitle = `Project ${unique}`;
 const assignmentTitle = `Assignment ${unique}`;
 const tagName = `tag-${unique}`;
 const noteTitle = `Note ${unique}`;
+const apiTokenName = `Browser API ${unique}`;
+let apiAuthorization;
 
 async function json(path, init) {
-  const response = await context.request.fetch(path, init);
+  const response = await context.request.fetch(path, {
+    ...init,
+    headers: {
+      ...(apiAuthorization ? { authorization: apiAuthorization } : {}),
+      ...init?.headers
+    }
+  });
   const body = await response.json();
   return { response, body };
 }
@@ -70,8 +93,45 @@ async function goto(path) {
 }
 
 try {
+  const health = await json("/api/health");
+  assert.equal(health.response.status(), 200);
+  assert.deepEqual(health.body, { status: "ok" });
+  const healthHeaders = health.response.headers();
+  assert.equal(healthHeaders["x-content-type-options"], "nosniff");
+  assert.match(healthHeaders["content-security-policy"], /nonce-[^' ]+/);
+  assert.match(
+    healthHeaders["content-security-policy"],
+    /frame-ancestors 'none'/
+  );
+  assert.equal(healthHeaders["referrer-policy"], "no-referrer");
+  assert.match(healthHeaders["permissions-policy"], /camera=\(\)/);
+  assert.equal(healthHeaders["x-frame-options"], "DENY");
+  assert.equal(healthHeaders["access-control-allow-origin"], undefined);
+  assert.equal(healthHeaders["strict-transport-security"], undefined);
+  const anonymousApi = await json("/api/v1/today");
+  assert.equal(anonymousApi.response.status(), 401);
   await goto("/");
+  await page.waitForURL(/\/login$/);
+  await page.getByRole("heading", { name: "Sign in to PersonalHub" }).waitFor();
+  await page.getByLabel("Owner password").fill("incorrect password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("alert").filter({ hasText: "incorrect" }).waitFor();
+  await page.getByLabel("Owner password").fill(ownerPassword);
+  await Promise.all([
+    page.waitForURL(`${baseURL}/`),
+    page.getByRole("button", { name: "Sign in" }).click()
+  ]);
   await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+  const sessionCookie = (await context.cookies()).find((cookie) =>
+    cookie.name.endsWith("personalhub_session")
+  );
+  assert.ok(sessionCookie);
+  assert.equal(sessionCookie.name, "__Host-personalhub_session");
+  assert.equal(sessionCookie.httpOnly, true);
+  assert.equal(sessionCookie.secure, true);
+  assert.equal(sessionCookie.sameSite, "Strict");
+  assert.equal(sessionCookie.path, "/");
+  captureProtectedActions = true;
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await page.getByRole("button", { name: "Switch to light mode" }).waitFor();
   await page.getByRole("button", { name: "Switch to light mode" }).click();
@@ -214,6 +274,17 @@ try {
     .getByRole("heading", { name: "That item no longer exists" })
     .waitFor();
 
+  await goto("/settings");
+  await page.getByLabel("Token name").fill(apiTokenName);
+  await page.getByLabel("Write").check();
+  await page.getByRole("button", { name: "Create token" }).click();
+  const plaintext = await page.getByTestId("new-api-token").textContent();
+  assert.match(plaintext ?? "", /^phv1\./);
+  apiAuthorization = `Bearer ${plaintext}`;
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  assert.equal(await page.getByTestId("new-api-token").count(), 0);
+
   const invalid = await json("/api/v1/capture", {
     method: "POST",
     data: { title: "" }
@@ -293,6 +364,51 @@ try {
   await page
     .getByRole("link", { name: repeatedTask, exact: true })
     .waitFor({ state: "detached" });
+
+  assert.ok(
+    capturedServerAction,
+    "Expected to capture a real Server Action request."
+  );
+  const beforeReplay = await json("/api/v1/tasks");
+  const beforeCount = beforeReplay.body.data.length;
+  const replayHeaders = {
+    "content-type": capturedServerAction.contentType,
+    "next-action": capturedServerAction.actionId
+  };
+  const crossOrigin = await context.request.fetch("/", {
+    method: "POST",
+    headers: { ...replayHeaders, origin: "https://evil.example" },
+    data: capturedServerAction.body
+  });
+  assert.equal(crossOrigin.ok(), false);
+  await context.clearCookies();
+  const anonymousAction = await context.request.fetch("/", {
+    method: "POST",
+    headers: { ...replayHeaders, origin: baseURL },
+    data: capturedServerAction.body
+  });
+  assert.equal(anonymousAction.ok(), false);
+  const afterReplay = await json("/api/v1/tasks");
+  assert.equal(afterReplay.body.data.length, beforeCount);
+
+  await goto("/settings");
+  await page.waitForURL(/\/login$/);
+  await page.getByLabel("Owner password").fill(ownerPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(`${baseURL}/`);
+  await goto("/settings");
+  const tokenCard = page
+    .locator("div.rounded-md.border")
+    .filter({ hasText: apiTokenName });
+  await tokenCard.getByRole("button", { name: "Revoke" }).click();
+  await tokenCard.getByText(/^Revoked /).waitFor();
+  const revoked = await json("/api/v1/today");
+  assert.equal(revoked.response.status(), 401);
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL(/\/login$/);
+  await goto("/tasks");
+  await page.waitForURL(/\/login$/);
 
   assert.deepEqual(errors, []);
 } catch (error) {

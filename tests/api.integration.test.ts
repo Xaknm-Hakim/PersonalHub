@@ -5,27 +5,108 @@ import { PATCH } from "@/app/api/v1/tasks/[id]/route";
 import { POST as complete } from "@/app/api/v1/tasks/[id]/complete/route";
 import { GET as today } from "@/app/api/v1/today/route";
 import { GET as upcoming } from "@/app/api/v1/upcoming/route";
+import { GET as health } from "@/app/api/health/route";
 import { todayDateOnly } from "@/lib/domain/dates";
+import { bootstrapOwner } from "@/lib/auth/owner";
+import { createApiToken, revokeApiToken } from "@/lib/auth/api-tokens";
 
 import {
   assertDisposableDatabase,
   disposableDatabase
 } from "./support/disposable-database";
 disposableDatabase();
+let authorization = "";
 const request = (url: string, init: RequestInit = {}) =>
   new Request(url, {
     ...init,
-    headers: { host: "localhost", ...init.headers }
+    headers: { authorization, ...init.headers }
   });
 describe("task API contracts against PostgreSQL", () => {
   beforeEach(async () => {
     await assertDisposableDatabase((sql) => prisma.$queryRawUnsafe(sql));
+    await prisma.loginThrottle.deleteMany();
+    await prisma.session.deleteMany();
+    await prisma.apiToken.deleteMany();
+    await prisma.owner.deleteMany();
     await prisma.note.deleteMany();
     await prisma.task.deleteMany();
     await prisma.tag.deleteMany();
+    await bootstrapOwner("correct horse battery staple");
+    const issued = await createApiToken({
+      name: "Integration test",
+      scopes: ["read", "write"]
+    });
+    authorization = `Bearer ${issued.plaintext}`;
   });
   afterAll(async () => prisma.$disconnect());
-  it("returns redacted validation/not-found responses, rejects foreign origins, and completes idempotently", async () => {
+  it("requires a bearer token and returns redacted request errors", async () => {
+    expect(
+      (await listTasks(new Request("http://localhost/api/v1/tasks"))).status
+    ).toBe(401);
+    expect(
+      (
+        await listTasks(
+          new Request("http://localhost/api/v1/tasks", {
+            headers: { authorization: "Bearer malformed" }
+          })
+        )
+      ).status
+    ).toBe(401);
+    const malformedJson = await createTask(
+      request("http://localhost/api/v1/tasks", {
+        method: "POST",
+        body: "{",
+        headers: { "content-type": "application/json" }
+      })
+    );
+    expect(malformedJson.status).toBe(400);
+    expect(JSON.stringify(await malformedJson.json())).not.toMatch(
+      /Prisma|postgres|password|stack/i
+    );
+    const readOnly = await createApiToken({
+      name: "Read only",
+      scopes: ["read"]
+    });
+    expect(
+      (
+        await createTask(
+          request("http://localhost/api/v1/tasks", {
+            method: "POST",
+            body: JSON.stringify({ title: "x" }),
+            headers: {
+              authorization: `Bearer ${readOnly.plaintext}`,
+              "content-type": "application/json"
+            }
+          })
+        )
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await createTask(
+          request("http://localhost/api/v1/tasks", {
+            method: "POST",
+            body: JSON.stringify({ title: "x" }),
+            headers: { "content-type": "text/plain" }
+          })
+        )
+      ).status
+    ).toBe(415);
+    const oversized = JSON.stringify({ title: "x".repeat(70_000) });
+    expect(
+      (
+        await createTask(
+          request("http://localhost/api/v1/tasks", {
+            method: "POST",
+            body: oversized,
+            headers: { "content-type": "application/json" }
+          })
+        )
+      ).status
+    ).toBe(413);
+  });
+
+  it("returns redacted validation/not-found responses and completes idempotently", async () => {
     expect(
       (
         await createTask(
@@ -48,21 +129,6 @@ describe("task API contracts against PostgreSQL", () => {
         )
       ).status
     ).toBe(422);
-    expect(
-      (
-        await createTask(
-          request("http://localhost/api/v1/tasks", {
-            method: "POST",
-            body: JSON.stringify({ title: "x" }),
-            headers: {
-              host: "localhost",
-              origin: "http://evil.example",
-              "content-type": "application/json"
-            }
-          })
-        )
-      ).status
-    ).toBe(403);
     const created = await createTask(
       request("http://localhost/api/v1/tasks", {
         method: "POST",
@@ -148,5 +214,16 @@ describe("task API contracts against PostgreSQL", () => {
     expect(
       (await upcoming(request("http://localhost/api/v1/upcoming"))).status
     ).toBe(200);
+  });
+
+  it("rejects revoked bearer tokens while leaving health public and non-sensitive", async () => {
+    const id = (await prisma.apiToken.findFirstOrThrow()).id;
+    await revokeApiToken(id);
+    expect((await today(request("http://localhost/api/v1/today"))).status).toBe(
+      401
+    );
+    const response = await health();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
   });
 });

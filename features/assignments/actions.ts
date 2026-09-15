@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ValidationError } from "@/lib/domain/dates";
 import { mutationSuccess, type MutationResult } from "@/lib/mutations";
+import { requireOwnerAction } from "@/lib/auth/web-session";
 import {
   createAssignment,
   deleteAssignment,
@@ -39,6 +40,7 @@ export async function createAssignmentAction(
   _: AssignmentFormState,
   form: FormData
 ): Promise<AssignmentFormState> {
+  await requireOwnerAction();
   try {
     await createAssignment(values(form));
     revalidatePath("/assignments");
@@ -51,6 +53,7 @@ export async function updateAssignmentAction(
   _: AssignmentFormState,
   form: FormData
 ): Promise<AssignmentFormState> {
+  await requireOwnerAction();
   try {
     if (!(await updateAssignment(value(form, "id"), values(form))))
       return { message: "This assignment no longer exists." };
@@ -63,6 +66,7 @@ export async function updateAssignmentAction(
 export async function deleteAssignmentAction(
   form: FormData
 ): Promise<MutationResult> {
+  await requireOwnerAction();
   try {
     if (!(await deleteAssignment(value(form, "id"))))
       return { ok: false, message: "This assignment no longer exists." };

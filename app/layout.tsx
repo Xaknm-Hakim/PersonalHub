@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AppShell } from "@/components/app-shell";
+import { headers } from "next/headers";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -8,13 +8,15 @@ export const metadata: Metadata = {
   description: "Local-first personal productivity app"
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `(() => {
 try {
@@ -30,9 +32,7 @@ try {
         />
       </head>
       <body>
-        <ThemeProvider>
-          <AppShell>{children}</AppShell>
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

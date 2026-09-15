@@ -10,6 +10,7 @@ import {
   FolderKanban,
   Home,
   ListTodo,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -18,6 +19,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { logoutAction } from "@/app/login/actions";
 
 const sidebarStorageKey = "personalhub-sidebar-open";
 
@@ -95,6 +97,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </Button>
             {sidebarOpen ? <ThemeToggle /> : null}
+            {sidebarOpen ? (
+              <form action={logoutAction}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Sign out"
+                  title="Sign out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </form>
+            ) : null}
           </div>
         </div>
         <nav
@@ -129,8 +143,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
         {sidebarOpen ? null : (
-          <div className="hidden border-t p-3 lg:block">
+          <div className="hidden space-y-2 border-t p-3 lg:block">
             <ThemeToggle />
+            <form action={logoutAction}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </form>
           </div>
         )}
       </aside>

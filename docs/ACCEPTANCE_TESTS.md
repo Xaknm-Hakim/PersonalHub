@@ -1,9 +1,14 @@
 # Acceptance Tests
 
-> Run against `http://127.0.0.1:3002` after `npm run docker:up`. Also verify quick capture, task project/tag links, note project link, a visible project task, a tag filter, and `/api/v1/today`.
+> Run against `http://127.0.0.1:3002` after `npm run docker:up` and one-time owner bootstrap. Also verify quick capture, task project/tag links, note project link, a visible project task, a tag filter, and bearer-authenticated `/api/v1/today`.
 
 ## Manual test cases
 
+- An unauthenticated product route redirects to login.
+- Incorrect login fails vaguely; correct login creates a session; logout removes access.
+- Settings creates a named scoped API token, shows its plaintext once, lists only metadata, and revokes it.
+- Anonymous and revoked bearer requests fail; a valid bearer request succeeds.
+- `/api/health` returns only a non-sensitive readiness result.
 - Can create, edit, and delete a task.
 - Can create, edit, and delete an assignment.
 - Can create an assignment with a type and without weight or marks.

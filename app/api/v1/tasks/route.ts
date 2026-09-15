@@ -1,4 +1,4 @@
-import { assertLocalAccess, apiError, ok } from "@/lib/http";
+import { apiError, jsonBody, ok, requireApi } from "@/lib/http";
 import { createTask, findTasks, taskDto } from "@/features/tasks/service";
 import { priorities, taskStatuses } from "@/lib/domain/status";
 import { parse } from "@/lib/domain/validation";
@@ -13,7 +13,7 @@ const query = z
   .strict();
 export async function GET(request: Request) {
   try {
-    assertLocalAccess(request);
+    await requireApi(request, "read");
     const p = new URL(request.url).searchParams;
     const filters = parse(
       query,
@@ -27,8 +27,8 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
   try {
-    assertLocalAccess(request);
-    return ok(taskDto(await createTask(await request.json())), 201);
+    await requireApi(request, "write");
+    return ok(taskDto(await createTask(await jsonBody(request))), 201);
   } catch (error) {
     return apiError(error);
   }

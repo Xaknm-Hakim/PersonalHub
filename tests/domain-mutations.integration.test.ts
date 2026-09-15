@@ -1,5 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+let sessionToken = "";
+vi.mock("next/headers", () => ({
+  headers: async () =>
+    new Headers({ host: "localhost", origin: "http://localhost" }),
+  cookies: async () => ({
+    get: () => (sessionToken ? { value: sessionToken } : undefined)
+  })
+}));
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -13,6 +21,7 @@ import {
   quickCaptureTaskAction,
   updateTaskAction
 } from "@/app/tasks/actions";
+import { bootstrapOwner, loginOwner } from "@/lib/auth/owner";
 
 import {
   assertDisposableDatabase,
@@ -22,11 +31,22 @@ disposableDatabase();
 describe("domain mutations against PostgreSQL", () => {
   beforeEach(async () => {
     await assertDisposableDatabase((sql) => prisma.$queryRawUnsafe(sql));
+    await prisma.loginThrottle.deleteMany();
+    await prisma.session.deleteMany();
+    await prisma.apiToken.deleteMany();
+    await prisma.owner.deleteMany();
     await prisma.note.deleteMany();
     await prisma.task.deleteMany();
     await prisma.assignment.deleteMany();
     await prisma.project.deleteMany();
     await prisma.tag.deleteMany();
+    await bootstrapOwner("correct horse battery staple");
+    const login = await loginOwner(
+      "correct horse battery staple",
+      "domain-actions"
+    );
+    if (!login.ok) throw new Error("Could not create test owner session.");
+    sessionToken = login.token;
   });
   afterAll(async () => prisma.$disconnect());
 

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ValidationError } from "@/lib/domain/dates";
 import { mutationSuccess, type MutationResult } from "@/lib/mutations";
+import { requireOwnerAction } from "@/lib/auth/web-session";
 import {
   captureTask,
   completeTask,
@@ -45,6 +46,7 @@ export async function quickCaptureTaskAction(
   _previous: FormState,
   form: FormData
 ): Promise<FormState> {
+  await requireOwnerAction();
   try {
     const task = await captureTask({
       title: value(form, "title"),
@@ -59,6 +61,7 @@ export async function createTaskAction(
   _previous: FormState,
   form: FormData
 ): Promise<FormState> {
+  await requireOwnerAction();
   try {
     await createTask(taskValues(form));
     revalidatePath("/tasks");
@@ -71,6 +74,7 @@ export async function updateTaskAction(
   _previous: FormState,
   form: FormData
 ): Promise<FormState> {
+  await requireOwnerAction();
   try {
     if (!(await updateTask(value(form, "id"), taskValues(form))))
       return { message: "This task no longer exists." };
@@ -83,6 +87,7 @@ export async function updateTaskAction(
 export async function completeTaskAction(
   form: FormData
 ): Promise<MutationResult> {
+  await requireOwnerAction();
   try {
     if (!(await completeTask(value(form, "id"))))
       return { ok: false, message: "This task no longer exists." };
@@ -98,6 +103,7 @@ export async function completeTaskAction(
 export async function deleteTaskAction(
   form: FormData
 ): Promise<MutationResult> {
+  await requireOwnerAction();
   try {
     if (!(await deleteTask(value(form, "id"))))
       return { ok: false, message: "This task no longer exists." };

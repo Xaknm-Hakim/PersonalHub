@@ -42,9 +42,14 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/prisma ./prisma
+RUN npm ci --omit=dev \
+  && npx prisma generate \
+  && npm cache clean --force
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/lib ./lib
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN chmod +x ./docker-entrypoint.sh

@@ -14,6 +14,7 @@ const database = `personalhub_test_browser_${suffix}`;
 const container = `personalhub-browser-${suffix}`;
 const volume = `personalhub-browser-${suffix}`;
 const password = randomBytes(24).toString("hex");
+const ownerPassword = randomBytes(24).toString("base64url");
 let started = false;
 let app: ChildProcess | undefined;
 
@@ -132,7 +133,7 @@ async function waitForApp(url: string) {
         `Production app exited before readiness (code ${app?.exitCode}).`
       );
     try {
-      const response = await fetch(`${url}/api/v1/today`);
+      const response = await fetch(`${url}/api/health`);
       if (response.ok) return;
     } catch {
       // Continue bounded readiness polling.
@@ -188,6 +189,10 @@ async function main() {
     };
     delete env.DATABASE_URL;
     run("npx", ["prisma", "migrate", "deploy"], env);
+    run("npx", ["tsx", "scripts/bootstrap-owner.ts"], {
+      ...env,
+      PERSONALHUB_OWNER_PASSWORD: ownerPassword
+    });
     const port = await freePort();
     const appUrl = `http://127.0.0.1:${port}`;
     const child = spawn(
@@ -212,7 +217,8 @@ async function main() {
     try {
       await runBrowser({
         ...env,
-        PERSONALHUB_BROWSER_URL: appUrl
+        PERSONALHUB_BROWSER_URL: appUrl,
+        PERSONALHUB_BROWSER_OWNER_PASSWORD: ownerPassword
       });
     } catch (error) {
       if (stdout.trim()) process.stderr.write(stdout);

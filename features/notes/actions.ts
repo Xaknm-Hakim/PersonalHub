@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ValidationError } from "@/lib/domain/dates";
 import { mutationSuccess, type MutationResult } from "@/lib/mutations";
+import { requireOwnerAction } from "@/lib/auth/web-session";
 import {
   createNote,
   deleteNote,
@@ -34,6 +35,7 @@ export async function createNoteAction(
   _: NoteFormState,
   f: FormData
 ): Promise<NoteFormState> {
+  await requireOwnerAction();
   try {
     await createNote(values(f));
     revalidatePath("/notes");
@@ -46,6 +48,7 @@ export async function updateNoteAction(
   _: NoteFormState,
   f: FormData
 ): Promise<NoteFormState> {
+  await requireOwnerAction();
   try {
     if (!(await updateNote(v(f, "id"), values(f))))
       return { message: "This note no longer exists." };
@@ -56,6 +59,7 @@ export async function updateNoteAction(
   }
 }
 export async function deleteNoteAction(f: FormData): Promise<MutationResult> {
+  await requireOwnerAction();
   try {
     if (!(await deleteNote(v(f, "id"))))
       return { ok: false, message: "This note no longer exists." };

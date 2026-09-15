@@ -1,37 +1,60 @@
 import { NextResponse } from "next/server";
 import { ValidationError } from "@/lib/domain/dates";
+import { verifyApiBearer, type ApiScope } from "@/lib/auth/api-tokens";
+import { AuthError } from "@/lib/auth/errors";
+import { logEvent } from "@/lib/logging";
 
-/** Single local access boundary; replace with an owner/session check when auth is introduced. */
-export function assertLocalAccess(request: Request) {
-  const host = request.headers.get("host") ?? "";
-  // Host is only a local deployment boundary, not authentication. Browser writes must
-  // additionally be same-origin to avoid a local-service CSRF primitive.
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host))
-    throw new AccessError(404, "NOT_FOUND", "Not found.");
-  if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
-    const origin = request.headers.get("origin");
-    if (origin) {
-      let originUrl: URL;
-      try {
-        originUrl = new URL(origin);
-      } catch {
-        throw new AccessError(
-          403,
-          "ACCESS_DENIED",
-          "Mutation origin is not allowed."
-        );
-      }
-      if (
-        originUrl.host.toLowerCase() !== host.toLowerCase() ||
-        !/^https?:$/.test(originUrl.protocol)
-      )
-        throw new AccessError(
-          403,
-          "ACCESS_DENIED",
-          "Mutation origin is not allowed."
-        );
-    }
+const maximumJsonBytes = 64 * 1024;
+
+export async function requireApi(request: Request, scope: ApiScope) {
+  try {
+    return await verifyApiBearer(request.headers.get("authorization"), scope);
+  } catch (error) {
+    logEvent("warn", "api_authentication_failed", {
+      reason: error instanceof AuthError ? error.code : "UNKNOWN"
+    });
+    throw error;
   }
+}
+
+export async function jsonBody(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (
+    !/^application\/(?:json|[a-z0-9!#$&^_.+-]+\+json)(?:\s*;|$)/i.test(
+      contentType
+    )
+  )
+    throw new AccessError(
+      415,
+      "UNSUPPORTED_MEDIA_TYPE",
+      "Content-Type must be application/json."
+    );
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximumJsonBytes)
+    throw new AccessError(
+      413,
+      "PAYLOAD_TOO_LARGE",
+      "Request body is too large."
+    );
+  const body = await request.text();
+  if (new TextEncoder().encode(body).byteLength > maximumJsonBytes)
+    throw new AccessError(
+      413,
+      "PAYLOAD_TOO_LARGE",
+      "Request body is too large."
+    );
+  if (!body.trim())
+    throw new AccessError(
+      400,
+      "INVALID_JSON",
+      "Request body must be valid JSON."
+    );
+  return JSON.parse(body) as unknown;
+}
+
+export function assertValidId(id: string) {
+  if (!/^[A-Za-z0-9_-]{1,191}$/.test(id))
+    throw new AccessError(422, "VALIDATION_ERROR", "ID is invalid.");
 }
 export class AccessError extends Error {
   constructor(
@@ -44,8 +67,24 @@ export class AccessError extends Error {
   }
 }
 export const ok = (data: unknown, status = 200) =>
-  NextResponse.json({ data }, { status });
+  NextResponse.json(
+    { data },
+    { status, headers: { "Cache-Control": "no-store" } }
+  );
 export function apiError(error: unknown) {
+  if (error instanceof AuthError)
+    return NextResponse.json(
+      { error: { code: error.code, message: error.message } },
+      {
+        status: error.status,
+        headers: {
+          "Cache-Control": "no-store",
+          ...(error.status === 401
+            ? { "WWW-Authenticate": 'Bearer realm="PersonalHub"' }
+            : {})
+        }
+      }
+    );
   if (error instanceof AccessError)
     return NextResponse.json(
       { error: { code: error.code, message: error.message } },
@@ -73,7 +112,9 @@ export function apiError(error: unknown) {
       },
       { status: 400 }
     );
-  console.error(error);
+  logEvent("error", "api_internal_error", {
+    errorType: error instanceof Error ? error.name : typeof error
+  });
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message: "Unexpected server error." } },
     { status: 500 }

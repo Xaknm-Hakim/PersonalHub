@@ -7,6 +7,52 @@ datasource db {
   url      = env("PERSONALHUB_DATABASE_URL")
 }
 
+model Owner {
+  id           String @id
+  passwordHash String
+  authVersion  Int @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sessions     Session[]
+  apiTokens    ApiToken[]
+}
+
+model Session {
+  id          String @id @default(cuid())
+  tokenHash   String @unique
+  ownerId     String
+  authVersion Int
+  expiresAt   DateTime
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  owner       Owner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model ApiToken {
+  id          String @id
+  ownerId     String
+  name        String
+  secretHash  String
+  scopes      String[]
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  owner       Owner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([revokedAt, expiresAt])
+}
+
+model LoginThrottle {
+  key          String @id
+  windowStart  DateTime
+  failureCount Int @default(0)
+  blockedUntil DateTime?
+  updatedAt    DateTime @updatedAt
+}
+
 // Planning dates are stored as UTC midnight. They are date-only values, never instants.
 model Task {
   id String @id @default(cuid())

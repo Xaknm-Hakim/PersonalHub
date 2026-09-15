@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ValidationError } from "@/lib/domain/dates";
 import { mutationSuccess, type MutationResult } from "@/lib/mutations";
+import { requireOwnerAction } from "@/lib/auth/web-session";
 import {
   createProject,
   deleteProject,
@@ -44,6 +45,7 @@ export async function createProjectAction(
   _: ProjectFormState,
   f: FormData
 ): Promise<ProjectFormState> {
+  await requireOwnerAction();
   try {
     await createProject(values(f));
     revalidatePath("/projects");
@@ -56,6 +58,7 @@ export async function updateProjectAction(
   _: ProjectFormState,
   f: FormData
 ): Promise<ProjectFormState> {
+  await requireOwnerAction();
   try {
     if (!(await updateProject(v(f, "id"), values(f))))
       return { message: "This project no longer exists." };
@@ -68,6 +71,7 @@ export async function updateProjectAction(
 export async function deleteProjectAction(
   f: FormData
 ): Promise<MutationResult> {
+  await requireOwnerAction();
   try {
     if (!(await deleteProject(v(f, "id"))))
       return { ok: false, message: "This project no longer exists." };

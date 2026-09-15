@@ -1,6 +1,6 @@
 # PersonalHub
 
-PersonalHub is a local-first personal productivity web app for notes, assignments, tasks, projects, deadlines, and simple timeline planning. It is designed for personal localhost usage, not as a SaaS product.
+PersonalHub is a privately hosted, single-owner personal productivity service for notes, assignments, tasks, projects, deadlines, and simple timeline planning. It is not a multi-user SaaS product.
 
 ## Tech stack
 
@@ -24,6 +24,17 @@ npm run docker:up
 ```
 
 The setup script creates `.env.overhaul` once with a random URL-safe password and the matching `PERSONALHUB_DATABASE_URL`; it refuses to overwrite an existing file. The canonical local app is `http://127.0.0.1:3002`; PostgreSQL is bound only to `127.0.0.1:5433`. The legacy SQLite application on port 3001 and its protected snapshots are deliberately separate and are not used, stopped, or changed by overhaul commands.
+
+After migrations are running, initialize the one owner without placing the password in shell history:
+
+```bash
+read -rsp 'Owner password: ' PERSONALHUB_OWNER_PASSWORD; printf '\n'
+export PERSONALHUB_OWNER_PASSWORD
+npx dotenv -e .env.overhaul -- npm run owner:bootstrap
+unset PERSONALHUB_OWNER_PASSWORD
+```
+
+The command never prints the password and refuses to replace an existing owner. See [the security model](./docs/SECURITY.md) before any network exposure.
 
 Assignments use a practical `type` field such as assignment, exercise, lab, quiz, project, revision, or other. Weight and marks are intentionally not part of the MVP data model.
 
@@ -89,7 +100,7 @@ npm run docker:logs
 npm run docker:down
 ```
 
-Compose uses an isolated named PostgreSQL volume and `restart: unless-stopped` for both services. Container startup runs `prisma migrate deploy` before `npm start`; it never runs seeds or SQLite commands.
+Compose uses an isolated named PostgreSQL volume and `restart: unless-stopped` for both services. Container startup runs `prisma migrate deploy` before `npm start`; it never runs seeds or SQLite commands. Consequently, the default entrypoint expects a non-superuser application schema-owner role with migration and runtime privileges. A later production deployment can use separate migration and runtime roles by running migrations as a controlled step and overriding the application command to `npm start`; deployment orchestration is intentionally outside this phase.
 
 ## Local database backups
 
@@ -133,12 +144,18 @@ npm run test:browser
 
 Quick capture accepts just a task title (and optionally a due date). Detailed task, assignment, project, and note forms validate server-side, support tags, and link tasks/notes to projects. Tags are managed at `/tags` and can filter tasks and notes.
 
-The local API is designed for future local clients and returns `{ "data": ... }` or `{ "error": { "code", "message", "fields" } }`:
+The versioned API is designed for trusted machine clients and returns `{ "data": ... }` or `{ "error": { "code", "message", "fields" } }`. Create a scoped token in Settings; browser cookies are not API credentials:
 
 ```bash
-curl http://127.0.0.1:3002/api/v1/today
-curl -X POST http://127.0.0.1:3002/api/v1/capture -H 'content-type: application/json' -d '{"title":"Call dentist","dueDate":"2026-09-12"}'
+curl http://127.0.0.1:3002/api/v1/today \
+  -H "Authorization: Bearer $PERSONALHUB_API_TOKEN"
+curl -X POST http://127.0.0.1:3002/api/v1/capture \
+  -H "Authorization: Bearer $PERSONALHUB_API_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"title":"Call dentist","dueDate":"2026-09-12"}'
 ```
+
+`GET /api/health` is the only public API endpoint and returns a non-sensitive database-readiness status. CORS is intentionally disabled because native clients such as Quickshell do not require it.
 
 Planning dates use validated `YYYY-MM-DD` values and are persisted as PostgreSQL date values at UTC midnight; dates are not client-local instants. Closed status semantics are shared by task, assignment, dashboard, calendar, and timeline queries.
 
@@ -157,6 +174,7 @@ The archived seed file is intentionally not wired to an npm or Make command. Do 
 - [API contract](./docs/API.md)
 - [Domain contract](./docs/DOMAIN.md)
 - [Testing and isolation rules](./docs/TESTING.md)
+- [Authentication and production security](./docs/SECURITY.md)
 - [Manual acceptance checks](./docs/ACCEPTANCE_TESTS.md)
 - [Product scope](./docs/PRODUCT_SPEC.md)
 - [Overhaul constraints and handoff](./docs/OVERHAUL-REPORT.md)

@@ -20,6 +20,7 @@ services:
       PERSONALHUB_DATABASE_URL: postgresql://personalhub:${PERSONALHUB_POSTGRES_PASSWORD}@postgres:5432/personalhub?schema=public
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      PERSONALHUB_TRUST_PROXY: "false"
     ports: ["127.0.0.1:3002:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -28,7 +29,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          'node -e "fetch(''http://localhost:3000/api/v1/today'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
+          'node -e "fetch(''http://localhost:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
         ]
       interval: 10s
       timeout: 5s

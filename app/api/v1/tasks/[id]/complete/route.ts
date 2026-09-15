@@ -1,12 +1,14 @@
-import { assertLocalAccess, apiError, ok } from "@/lib/http";
+import { apiError, assertValidId, ok, requireApi } from "@/lib/http";
 import { completeTask, taskDto } from "@/features/tasks/service";
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    assertLocalAccess(request);
-    const task = await completeTask((await params).id);
+    await requireApi(request, "write");
+    const id = (await params).id;
+    assertValidId(id);
+    const task = await completeTask(id);
     return task
       ? ok(taskDto(task))
       : Response.json(
