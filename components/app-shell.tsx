@@ -55,7 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div
       className={cn(
         "min-h-screen lg:grid",
-        sidebarOpen ? "lg:grid-cols-[240px_1fr]" : "lg:grid-cols-[64px_1fr]"
+        sidebarOpen ? "lg:grid-cols-[272px_1fr]" : "lg:grid-cols-[64px_1fr]"
       )}
     >
       <aside className="border-b bg-card lg:min-h-screen lg:border-b-0 lg:border-r">
@@ -63,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className={cn(
             "flex h-16 items-center gap-2 border-b px-3",
             sidebarOpen
-              ? "justify-between lg:px-5"
+              ? "justify-between lg:px-4"
               : "justify-between lg:flex-col lg:justify-center lg:px-2"
           )}
         >

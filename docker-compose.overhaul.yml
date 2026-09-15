@@ -21,7 +21,7 @@ services:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PERSONALHUB_TRUST_PROXY: "false"
-    ports: ["127.0.0.1:3002:3000"]
+    ports: ["0.0.0.0:3002:3000"]
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped

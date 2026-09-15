@@ -131,6 +131,73 @@ try {
   assert.equal(sessionCookie.secure, true);
   assert.equal(sessionCookie.sameSite, "Strict");
   assert.equal(sessionCookie.path, "/");
+
+  const sidebar = page.locator("aside");
+  const brand = page.getByRole("link", { name: "PersonalHub", exact: true });
+  const hideSidebar = page.getByRole("button", { name: "Hide sidebar" });
+  const themeButton = page.getByRole("button", {
+    name: /Switch to (?:dark|light) mode/
+  });
+  const signOut = page.getByRole("button", { name: "Sign out" });
+  const [sidebarBox, brandBox, hideBox, themeBox, signOutBox] =
+    await Promise.all(
+      [sidebar, brand, hideSidebar, themeButton, signOut].map((locator) =>
+        locator.boundingBox()
+      )
+    );
+  assert.ok(sidebarBox && brandBox && hideBox && themeBox && signOutBox);
+  assert.ok(brandBox.x + brandBox.width + 8 <= hideBox.x);
+  assert.ok(hideBox.x + hideBox.width + 4 <= themeBox.x);
+  assert.ok(themeBox.x + themeBox.width + 4 <= signOutBox.x);
+  assert.ok(
+    signOutBox.x + signOutBox.width <= sidebarBox.x + sidebarBox.width - 8
+  );
+  assert.ok([hideBox, themeBox, signOutBox].every((box) => box.width >= 36));
+
+  for (const width of [1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const [
+      resizedSidebarBox,
+      resizedBrandBox,
+      resizedHideBox,
+      resizedSignOutBox
+    ] = await Promise.all(
+      [sidebar, brand, hideSidebar, signOut].map((locator) =>
+        locator.boundingBox()
+      )
+    );
+    assert.ok(
+      resizedSidebarBox &&
+        resizedBrandBox &&
+        resizedHideBox &&
+        resizedSignOutBox
+    );
+    assert.ok(
+      resizedBrandBox.x + resizedBrandBox.width + 8 <= resizedHideBox.x
+    );
+    assert.ok(
+      resizedSignOutBox.x + resizedSignOutBox.width <=
+        resizedSidebarBox.x + resizedSidebarBox.width - 8
+    );
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await hideSidebar.click();
+  const showSidebar = page.getByRole("button", { name: "Show sidebar" });
+  await showSidebar.waitFor();
+  const [collapsedSidebarBox, showBox] = await Promise.all([
+    sidebar.boundingBox(),
+    showSidebar.boundingBox()
+  ]);
+  assert.ok(collapsedSidebarBox && showBox);
+  assert.ok(showBox.x >= collapsedSidebarBox.x + 8);
+  assert.ok(
+    showBox.x + showBox.width <=
+      collapsedSidebarBox.x + collapsedSidebarBox.width - 8
+  );
+  await showSidebar.click();
+  await hideSidebar.waitFor();
+
   captureProtectedActions = true;
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await page.getByRole("button", { name: "Switch to light mode" }).waitFor();

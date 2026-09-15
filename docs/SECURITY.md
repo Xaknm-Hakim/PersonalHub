@@ -6,10 +6,10 @@ PersonalHub is a single-owner service. It has no registration, account discovery
 
 The owner is created once by a server-side command. The command rejects passwords shorter than 12 or longer than 1024 characters, refuses to overwrite the fixed `owner` record, and never prints the password.
 
-For a local source checkout, enter the value without placing it in shell history:
+For a local source checkout using zsh, enter the value without placing it in shell history:
 
 ```bash
-read -rsp 'Owner password: ' PERSONALHUB_OWNER_PASSWORD; printf '\n'
+read -rs 'PERSONALHUB_OWNER_PASSWORD?Owner password (12 characters minimum): '; printf '\n'
 export PERSONALHUB_OWNER_PASSWORD
 npx dotenv -e .env.overhaul -- npm run owner:bootstrap
 unset PERSONALHUB_OWNER_PASSWORD

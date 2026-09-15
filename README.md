@@ -23,12 +23,20 @@ npm run prisma:generate
 npm run docker:up
 ```
 
-The setup script creates `.env.overhaul` once with a random URL-safe password and the matching `PERSONALHUB_DATABASE_URL`; it refuses to overwrite an existing file. The canonical local app is `http://127.0.0.1:3002`; PostgreSQL is bound only to `127.0.0.1:5433`. The legacy SQLite application on port 3001 and its protected snapshots are deliberately separate and are not used, stopped, or changed by overhaul commands.
+The setup script creates `.env.overhaul` once with a random URL-safe password and the matching `PERSONALHUB_DATABASE_URL`; it refuses to overwrite an existing file. The canonical local app is `http://127.0.0.1:3002`, and port 3002 is also published on the host's LAN interfaces for mobile reachability testing. PostgreSQL remains bound only to `127.0.0.1:5433`. The legacy SQLite application on port 3001 and its protected snapshots are deliberately separate and are not used, stopped, or changed by overhaul commands. Because Compose runs the hardened production mode, authenticated browser sessions retain Secure cookies: plain HTTP on a LAN IP can verify reachability but must not be used to transmit the owner password or bearer tokens. Full authenticated mobile testing requires an HTTPS endpoint.
 
-After migrations are running, initialize the one owner without placing the password in shell history:
+Older `.env.overhaul` files may contain only `PERSONALHUB_POSTGRES_PASSWORD`. Do not rerun the setup script or replace that password. Add `PERSONALHUB_DATABASE_URL` using the same existing URL-safe password in this form:
+
+```text
+postgresql://personalhub:<same-existing-password>@127.0.0.1:5433/personalhub?schema=public
+```
+
+Keep `.env.overhaul` owner-readable only (`chmod 600 .env.overhaul`) because both values are secrets.
+
+After migrations are running, initialize the one owner without placing the password in shell history. In zsh:
 
 ```bash
-read -rsp 'Owner password: ' PERSONALHUB_OWNER_PASSWORD; printf '\n'
+read -rs 'PERSONALHUB_OWNER_PASSWORD?Owner password (12 characters minimum): '; printf '\n'
 export PERSONALHUB_OWNER_PASSWORD
 npx dotenv -e .env.overhaul -- npm run owner:bootstrap
 unset PERSONALHUB_OWNER_PASSWORD
