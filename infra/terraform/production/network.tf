@@ -62,10 +62,10 @@ resource "aws_security_group" "host" {
   description = "PersonalHub host: no ingress; explicit outbound services only"
   vpc_id      = aws_vpc.main.id
 
-  # Keep both directions explicit. Ingress is intentionally empty: SSM provides
-  # administration and a future Cloudflare Tunnel will initiate outbound.
+  # Ingress is intentionally empty: SSM provides administration and a future
+  # Cloudflare Tunnel will initiate outbound. Egress is managed exclusively by
+  # the standalone aws_vpc_security_group_egress_rule resources below.
   ingress = []
-  egress  = []
 
   tags = {
     Name = "${local.name_prefix}-host"
