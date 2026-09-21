@@ -16,3 +16,16 @@ backups/postgres/
 *.backup
 *.sql.gz
 *.tsbuildinfo
+
+# Terraform working directories, local state, plans, and local configuration
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.plan
+tfplan
+*.tfvars
+!*.tfvars.example
+infra/terraform/production/backend.hcl

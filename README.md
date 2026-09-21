@@ -186,3 +186,4 @@ The archived seed file is intentionally not wired to an npm or Make command. Do 
 - [Manual acceptance checks](./docs/ACCEPTANCE_TESTS.md)
 - [Product scope](./docs/PRODUCT_SPEC.md)
 - [Overhaul constraints and handoff](./docs/OVERHAUL-REPORT.md)
+- [AWS infrastructure and Terraform workflow](./docs/INFRASTRUCTURE.md)

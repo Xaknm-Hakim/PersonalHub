@@ -1,0 +1,125 @@
+# PersonalHub infrastructure
+
+This directory contains Infrastructure Phase 1 only: the Terraform state bootstrap and the AWS foundation for a single-owner PersonalHub deployment. It does not deploy application containers, initialize PostgreSQL, create the owner, configure Ansible, configure Cloudflare, or add a GitHub Actions deployment workflow.
+
+## Architecture
+
+The production stack creates one dedicated VPC (`10.42.0.0/16` by default) with one public subnet, an Internet Gateway, and a public route. One ARM64 `t4g.small` instance runs the current Canonical Ubuntu 24.04 LTS ARM64 AMI discovered at plan time. Its encrypted gp3 root disk defaults to 25 GiB.
+
+The instance receives a public IPv4 because this design deliberately has no NAT Gateway: the address gives the host direct, instance-initiated access to SSM, ECR, package repositories, and later Cloudflare Tunnel endpoints. It does not make a service reachable. The attached security group has no ingress rules—no SSH, HTTP, HTTPS, or PostgreSQL—and only explicit outbound DNS, HTTP, HTTPS, and future Cloudflare Tunnel transport rules.
+
+Administration uses AWS Systems Manager Session Manager and Run Command. The instance role receives AWS-managed `AmazonSSMManagedInstanceCore`; there is no EC2 key pair and SSH is not a fallback. Once the instance is running and its SSM agent has registered, target the `ec2_instance_id` Terraform output with SSM.
+
+Future application images will live in a private, encrypted, scan-on-push ECR repository. Immutable tags and lifecycle cleanup retain up to 30 recent images by default for rollback. This phase grants only the EC2 host permission to authenticate to ECR and pull from that repository. It does not create GitHub OIDC or image-push permissions.
+
+A future Cloudflare Tunnel process will create outbound connections on ports 443 or 7844 and provide application ingress without opening the EC2 security group. Cloudflare and application runtime configuration are intentionally deferred.
+
+## State bucket versus backup bucket
+
+The bootstrap stack creates an S3 bucket used only for Terraform's production state. It has versioning, S3-managed encryption, public-access blocks, bucket-owner-enforced ownership, TLS-only access, and `prevent_destroy`. Production uses S3's native lockfile support (`use_lockfile = true`), so no DynamoDB locking table is created.
+
+The production stack creates a different private S3 bucket for future PostgreSQL dumps under `postgresql/`. It has the same private/encrypted baseline, a configurable 90-day current-object retention period, 30-day noncurrent-version cleanup, and incomplete multipart-upload cleanup. The EC2 role can list that prefix and upload/read backup objects; it cannot make objects public or delete completed backups. This phase does not create backup scripts or schedules.
+
+Never store application secrets, database passwords, owner credentials, or Terraform credentials in either Terraform variables or committed files. Terraform state may contain infrastructure metadata and must still be treated as sensitive.
+
+## Prerequisites
+
+- Terraform 1.10 or newer (required for native S3 lockfiles)
+- AWS credentials supplied through the normal AWS SDK credential chain
+- Permission to create the listed S3, VPC, EC2, IAM, ECR, and related resources in `ap-southeast-1`
+
+No values must be changed for the agreed architecture. Optionally copy each `terraform.tfvars.example` to an ignored `terraform.tfvars` and adjust only non-secret settings.
+
+## 1. Bootstrap the remote backend
+
+Bootstrap state intentionally remains local.
+
+```text
+cd infra/terraform/bootstrap
+terraform init
+terraform fmt -check
+terraform validate
+terraform plan -out=bootstrap.tfplan
+terraform apply bootstrap.tfplan
+terraform output
+```
+
+The bucket name combines the project, environment, and AWS account ID, making it globally unique without embedding a personal secret. After apply, capture the backend values:
+
+```text
+terraform output -raw state_bucket_name
+terraform output -raw state_bucket_region
+terraform output -raw production_backend_key
+```
+
+The bootstrap plan creates exactly six managed resources: one S3 bucket plus ownership controls, public-access blocking, versioning, encryption configuration, and a TLS-enforcement bucket policy. Bootstrap does not create DynamoDB.
+
+## 2. Initialize and migrate production state
+
+Copy the safe example, then replace only the bucket placeholder with `state_bucket_name` from bootstrap:
+
+```text
+cd ../production
+cp backend.hcl.example backend.hcl
+# Edit backend.hcl: set bucket to the bootstrap output.
+terraform init -backend-config=backend.hcl
+```
+
+`backend.hcl` is ignored because it is generated for a particular account; it contains no credentials. On first initialization there is no production state to migrate. If local production state ever exists, rerun the command with `-migrate-state` and review Terraform's prompt. Do not copy or commit any `.tfstate` file.
+
+For a changed backend configuration, use:
+
+```text
+terraform init -reconfigure -backend-config=backend.hcl
+```
+
+## 3. Production workflow
+
+```text
+terraform fmt -check -recursive ..
+terraform validate
+terraform plan -out=production.tfplan
+# Apply only after reviewing the saved plan:
+terraform apply production.tfplan
+```
+
+The production plan creates 27 managed resources:
+
+- networking (13): VPC, Internet Gateway, subnet, route table, default route, route-table association, zero-ingress security group, and six explicit egress rules;
+- IAM (4): EC2 role, SSM managed-policy attachment, least-privilege inline ECR/backup policy, and instance profile;
+- registry (2): private ECR repository and lifecycle policy;
+- backup storage (7): S3 bucket, ownership controls, public-access block, versioning, encryption, lifecycle configuration, and TLS-enforcement policy;
+- compute (1): ARM64 EC2 instance with its encrypted root EBS volume managed as part of the instance resource.
+
+Useful outputs include the VPC and subnet IDs, security group ID, instance ID and public IP, ECR repository URL, backup bucket name, IAM role name, and region. Outputs contain no secrets.
+
+After an apply, allow the preinstalled Ubuntu SSM agent a few minutes to register, then verify that AWS reports the instance online before relying on it for administration:
+
+```text
+INSTANCE_ID=$(terraform output -raw ec2_instance_id)
+aws ssm describe-instance-information \
+  --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+  --query 'InstanceInformationList[0].PingStatus' \
+  --output text
+aws ssm start-session --target "${INSTANCE_ID}"
+```
+
+The first command must return `Online`. Failure to register is an IAM, agent, DNS, routing, or outbound-connectivity problem; do not add SSH ingress as a workaround.
+
+## Expected AWS cost surfaces
+
+The main recurring costs are the `t4g.small` instance, its gp3 EBS volume, and the public IPv4 address. S3 backup/state storage, ECR image storage/scanning behavior, requests, and internet data transfer vary with use. The VPC, subnet, route table, Internet Gateway attachment, IAM role, security group, and basic Systems Manager node management do not by themselves add the cost of a NAT Gateway or load balancer. Check current `ap-southeast-1` pricing before apply.
+
+## Safe destruction
+
+Destroy production before bootstrap so Terraform can continue reading and updating remote state:
+
+```text
+cd infra/terraform/production
+terraform plan -destroy -out=destroy.tfplan
+terraform apply destroy.tfplan
+```
+
+The backup bucket has `prevent_destroy` and versioning. Preserve or explicitly remove its retained backups, then deliberately remove `prevent_destroy` from code only when permanent deletion is intended. S3 refuses to delete a non-empty versioned bucket; that is an additional safeguard, not an error to bypass casually.
+
+Destroying bootstrap is a separate, last step. First retain a secure copy of any state you need, remove every state object version and lockfile only when certain they are no longer required, and deliberately remove the state bucket's `prevent_destroy`. Then plan and apply bootstrap destruction from its local state. Deleting the backend first strands production state and must be avoided.
