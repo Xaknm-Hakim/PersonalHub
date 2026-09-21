@@ -42,3 +42,13 @@ output "ssm_instance_role_name" {
   description = "IAM role attached to the EC2 instance."
   value       = aws_iam_role.host.name
 }
+
+output "ansible_transfer_bucket_name" {
+  description = "Private, non-versioned S3 bucket for ephemeral Ansible-over-SSM module transfers."
+  value       = aws_s3_bucket.ansible_transfer.id
+}
+
+output "ansible_controller_policy_arn" {
+  description = "Least-privilege policy available for attachment to a future Ansible controller identity."
+  value       = aws_iam_policy.ansible_controller_transfer.arn
+}
