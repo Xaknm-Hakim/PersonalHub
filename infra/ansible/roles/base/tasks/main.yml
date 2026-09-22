@@ -1,0 +1,121 @@
+---
+- name: Verify the supported operating system and architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution"] == "Ubuntu"
+      - ansible_facts["distribution_version"] == "24.04"
+      - ansible_facts["architecture"] == "aarch64"
+    fail_msg: >-
+      Phase 2A supports only the Terraform-managed Ubuntu 24.04 ARM64 host.
+
+- name: Refresh apt metadata when stale
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install required base and operational packages
+  ansible.builtin.apt:
+    name: "{{ personalhub_base_packages }}"
+    state: present
+
+- name: Create the AWS CLI installation cache
+  ansible.builtin.file:
+    path: "/var/cache/personalhub/aws-cli-{{ personalhub_aws_cli_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the pinned AWS CLI v2 ARM64 archive
+  ansible.builtin.get_url:
+    url: >-
+      https://awscli.amazonaws.com/awscli-exe-linux-aarch64-{{ personalhub_aws_cli_version }}.zip
+    dest: "/var/cache/personalhub/awscliv2-{{ personalhub_aws_cli_version }}-aarch64.zip"
+    checksum: "sha256:{{ personalhub_aws_cli_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract the pinned AWS CLI v2 installer
+  ansible.builtin.unarchive:
+    src: "/var/cache/personalhub/awscliv2-{{ personalhub_aws_cli_version }}-aarch64.zip"
+    dest: "/var/cache/personalhub/aws-cli-{{ personalhub_aws_cli_version }}"
+    remote_src: true
+    creates: "/var/cache/personalhub/aws-cli-{{ personalhub_aws_cli_version }}/aws/install"
+
+- name: Install the pinned AWS CLI v2 release
+  ansible.builtin.command:
+    argv:
+      - "/var/cache/personalhub/aws-cli-{{ personalhub_aws_cli_version }}/aws/install"
+      - --bin-dir
+      - /usr/local/bin
+      - --install-dir
+      - /usr/local/aws-cli
+  args:
+    creates: "/usr/local/aws-cli/v2/{{ personalhub_aws_cli_version }}/bin/aws"
+
+- name: Set the localtime link to UTC
+  ansible.builtin.file:
+    src: /usr/share/zoneinfo/Etc/UTC
+    dest: /etc/localtime
+    state: link
+    force: true
+
+- name: Record UTC as the server timezone
+  ansible.builtin.copy:
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Etc/UTC
+
+- name: Enable and start systemd time synchronization
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+
+- name: Disable and mask the SSH socket
+  ansible.builtin.systemd_service:
+    name: ssh.socket
+    enabled: false
+    masked: true
+    state: stopped
+
+- name: Disable and mask the SSH service
+  ansible.builtin.systemd_service:
+    name: ssh.service
+    enabled: false
+    masked: true
+    state: stopped
+
+- name: Configure unattended security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Create journald configuration directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Bound persistent journal retention
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/60-personalhub.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Journal]
+      SystemMaxUse=500M
+      MaxRetentionSec=14day
+  notify: Restart systemd-journald

@@ -1,0 +1,12 @@
+---
+- name: Configure the PersonalHub production host
+  hosts: personalhub_hosts
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/personalhub_hosts.yml
+
+  roles:
+    - role: base
+    - role: docker
+    - role: personalhub_host

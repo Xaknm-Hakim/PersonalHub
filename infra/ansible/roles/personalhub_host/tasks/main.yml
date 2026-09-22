@@ -1,0 +1,41 @@
+---
+- name: Create the PersonalHub runtime group
+  ansible.builtin.group:
+    name: "{{ personalhub_runtime_group }}"
+    system: true
+    state: present
+
+- name: Create the locked PersonalHub runtime user
+  ansible.builtin.user:
+    name: "{{ personalhub_runtime_user }}"
+    group: "{{ personalhub_runtime_group }}"
+    groups:
+      - docker
+    append: true
+    system: true
+    create_home: true
+    home: "{{ personalhub_root }}"
+    shell: /usr/sbin/nologin
+    password_lock: true
+    state: present
+
+- name: Create runtime-owned PersonalHub directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ personalhub_runtime_user }}"
+    group: "{{ personalhub_runtime_group }}"
+    mode: "0750"
+  loop:
+    - "{{ personalhub_root }}"
+    - "{{ personalhub_root }}/compose"
+    - "{{ personalhub_root }}/deploy"
+    - "{{ personalhub_root }}/backups"
+
+- name: Create the restricted PersonalHub configuration directory
+  ansible.builtin.file:
+    path: "{{ personalhub_config_root }}"
+    state: directory
+    owner: root
+    group: "{{ personalhub_runtime_group }}"
+    mode: "0750"
