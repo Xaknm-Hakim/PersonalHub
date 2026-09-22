@@ -52,3 +52,11 @@ output "ansible_controller_policy_arn" {
   description = "Least-privilege policy available for attachment to a future Ansible controller identity."
   value       = aws_iam_policy.ansible_controller_transfer.arn
 }
+
+output "production_secret_parameter_names" {
+  description = "Names of the SecureString parameters read by the production host."
+  value = {
+    postgres_password       = aws_ssm_parameter.postgres_password.name
+    cloudflare_tunnel_token = aws_ssm_parameter.cloudflare_tunnel_token.name
+  }
+}

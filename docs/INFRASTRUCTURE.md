@@ -1,6 +1,6 @@
 # PersonalHub infrastructure
 
-This directory contains the Terraform state bootstrap, the Phase 1 AWS foundation, and the approved S3 transport prerequisite for a later Ansible-over-SSM phase. It does not deploy application containers, initialize PostgreSQL, create the owner, configure the host with Ansible, configure Cloudflare, or add a GitHub Actions deployment workflow.
+This directory contains the Terraform state bootstrap, the AWS foundation, the Ansible-over-SSM transport prerequisite, and the production secret parameters used by the host runtime. Terraform does not deploy application containers, initialize PostgreSQL, create the owner, configure Cloudflare, or add a GitHub Actions deployment workflow.
 
 ## Architecture
 
@@ -26,9 +26,20 @@ The EC2 role does not receive access to the Ansible transfer bucket. The plugin'
 
 Never store application secrets, database passwords, owner credentials, or Terraform credentials in either Terraform variables or committed files. Terraform state may contain infrastructure metadata and must still be treated as sensitive.
 
+## Production secret parameters
+
+Terraform owns two Standard-tier SSM Parameter Store `SecureString` resources encrypted with the default AWS-managed SSM key:
+
+- `/personalhub/production/postgres/password`
+- `/personalhub/production/cloudflare/tunnel-token`
+
+Their values enter Terraform only through ephemeral, sensitive input variables and the AWS provider's write-only `value_wo` argument. Plaintext is therefore omitted from configuration, saved plans, output, and state. Creating or rotating either parameter requires supplying its ephemeral value and incrementing the corresponding non-secret write-only version variable. Operators should retrieve an existing value from SSM directly into process memory when a routine no-change plan needs the required ephemeral input; do not write it to a tfvars file.
+
+The EC2 role can call only `ssm:GetParameter` and `ssm:GetParameters` on those two exact parameter ARNs. It has no wildcard Parameter Store access. The owner bootstrap password is deliberately excluded because it is a one-time interactive input, not a deployment secret.
+
 ## Prerequisites
 
-- Terraform 1.10 or newer (required for native S3 lockfiles)
+- Terraform 1.11 or newer (required for ephemeral variables and write-only provider arguments; native S3 lockfiles require 1.10 or newer)
 - AWS credentials supplied through the normal AWS SDK credential chain
 - Permission to create the listed S3, VPC, EC2, IAM, ECR, and related resources in `ap-southeast-1`
 
@@ -87,13 +98,14 @@ terraform plan -out=production.tfplan
 terraform apply production.tfplan
 ```
 
-The production stack manages 34 resources after the Ansible transport amendment:
+The production stack manages 36 resources after the Ansible transport and production-secret amendments:
 
 - networking (13): VPC, Internet Gateway, subnet, route table, default route, route-table association, zero-ingress security group, and six explicit egress rules;
 - IAM (4): EC2 role, SSM managed-policy attachment, least-privilege inline ECR/backup policy, and instance profile;
 - registry (2): private ECR repository and lifecycle policy;
 - backup storage (7): S3 bucket, ownership controls, public-access block, versioning, encryption, lifecycle configuration, and TLS-enforcement policy;
 - Ansible transport (7): non-versioned S3 bucket, ownership controls, public-access block, encryption, one-day lifecycle cleanup, TLS-enforcement policy, and an unattached least-privilege controller policy;
+- production secrets (2): write-only SSM SecureString parameters for the PostgreSQL password and existing Cloudflare Tunnel token;
 - compute (1): ARM64 EC2 instance with its encrypted root EBS volume managed as part of the instance resource.
 
 Useful outputs include the VPC and subnet IDs, security group ID, instance ID and public IP, ECR repository URL, backup and Ansible-transfer bucket names, controller policy ARN, IAM role name, and region. Outputs contain no secrets.

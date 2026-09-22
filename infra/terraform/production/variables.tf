@@ -96,3 +96,49 @@ variable "ecr_image_retention_count" {
     error_message = "ecr_image_retention_count must be between 10 and 200."
   }
 }
+
+variable "production_postgres_password" {
+  description = "Write-only PostgreSQL password used to create or rotate the production SecureString parameter."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = length(var.production_postgres_password) >= 43 && can(regex("^[A-Za-z0-9_-]+$", var.production_postgres_password))
+    error_message = "production_postgres_password must be at least 43 URL-safe characters."
+  }
+}
+
+variable "production_postgres_password_version" {
+  description = "Increment to intentionally rotate the write-only PostgreSQL password."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.production_postgres_password_version >= 1 && floor(var.production_postgres_password_version) == var.production_postgres_password_version
+    error_message = "production_postgres_password_version must be a positive integer."
+  }
+}
+
+variable "production_cloudflare_tunnel_token" {
+  description = "Write-only Cloudflare Tunnel token used to create or rotate the production SecureString parameter."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = length(var.production_cloudflare_tunnel_token) >= 20
+    error_message = "production_cloudflare_tunnel_token must not be empty or truncated."
+  }
+}
+
+variable "production_cloudflare_tunnel_token_version" {
+  description = "Increment to intentionally rotate the write-only Cloudflare Tunnel token."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.production_cloudflare_tunnel_token_version >= 1 && floor(var.production_cloudflare_tunnel_token_version) == var.production_cloudflare_tunnel_token_version
+    error_message = "production_cloudflare_tunnel_token_version must be a positive integer."
+  }
+}

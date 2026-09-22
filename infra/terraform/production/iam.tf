@@ -73,6 +73,19 @@ data "aws_iam_policy_document" "host" {
     ]
     resources = ["${aws_s3_bucket.postgres_backups.arn}/postgresql/*"]
   }
+
+  statement {
+    sid    = "ReadProductionRuntimeParameters"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+    ]
+    resources = [
+      aws_ssm_parameter.postgres_password.arn,
+      aws_ssm_parameter.cloudflare_tunnel_token.arn,
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "host" {
