@@ -60,9 +60,9 @@ def main() -> None:
         f"postgresql://personalhub:{encoded_password}@postgres:5432/personalhub?schema=public\n"
     )
 
-    CONFIG_ROOT.mkdir(mode=0o750, parents=True, exist_ok=True)
+    CONFIG_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(CONFIG_ROOT, 0, 0)
-    os.chmod(CONFIG_ROOT, 0o750)
+    os.chmod(CONFIG_ROOT, 0o700)
 
     fd, temporary_name = tempfile.mkstemp(prefix=".runtime.env.", dir=CONFIG_ROOT)
     temporary_path = Path(temporary_name)
