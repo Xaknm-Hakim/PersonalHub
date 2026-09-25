@@ -16,6 +16,8 @@ backups/postgres/
 *.backup
 *.sql.gz
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 
 # Terraform working directories, local state, plans, and local configuration
 **/.terraform/*
