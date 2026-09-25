@@ -10,3 +10,4 @@
     - role: base
     - role: docker
     - role: personalhub_host
+    - role: personalhub_runtime

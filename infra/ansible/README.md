@@ -1,6 +1,6 @@
 # PersonalHub Ansible host configuration
 
-Phase 2A configures only the Terraform-managed Ubuntu 24.04 ARM64 host. It installs operating-system prerequisites and Docker, creates a locked runtime account, and prepares production directories. It does not deploy PersonalHub, start PostgreSQL, configure Cloudflare, create secrets, run migrations, initialize the owner, or change AWS infrastructure.
+Phase 2A configures the Terraform-managed Ubuntu 24.04 ARM64 host. Phase 2B.3 adds the static private-runtime definition and root-only deployment helpers. Ansible does not select an application release, retrieve secrets during convergence, start containers, configure Cloudflare, initialize the owner, or change AWS infrastructure.
 
 ## Controller prerequisites
 
@@ -55,7 +55,7 @@ ansible-playbook playbooks/configure-host.yml
 ansible-playbook playbooks/verify-host.yml
 ```
 
-The second configuration run should report `changed=0`. Package metadata tasks use bounded cache handling; observational verification tasks explicitly report no change.
+The second configuration run should report `changed=0`. Package metadata tasks use bounded cache handling; observational verification tasks explicitly report no change. Run `verify-host.yml` after the Phase 2B.3 deployment because it expects the private `app` and `postgres` services to be healthy.
 
 Docker comes from Docker's official Ubuntu apt repository. The host installs Docker Engine, containerd, and the Compose plugin natively for ARM64. Buildx is omitted because routine production deployment will pull prebuilt ECR images rather than build on the host. AWS CLI v2 is installed from a pinned official ARM64 archive with a pinned SHA-256 checksum; it uses only the EC2 instance role.
 
@@ -70,10 +70,10 @@ The Ubuntu image's SSH service and socket are disabled and masked. Systems Manag
 /opt/personalhub/compose/   personalhub:personalhub 0750
 /opt/personalhub/deploy/    personalhub:personalhub 0750
 /opt/personalhub/backups/   personalhub:personalhub 0750
-/etc/personalhub/           root:personalhub        0750
+/etc/personalhub/           root:root               0700
 ```
 
-Future secrets belong under `/etc/personalhub` in root-owned, restricted files. This phase creates no secret files. Future PostgreSQL data should use a deliberate Docker named volume, never the Git checkout or deployment directories.
+`personalhub-materialize-runtime-env` retrieves only the PostgreSQL password through the instance role and writes `/etc/personalhub/runtime.env` atomically as `root:root` mode `0600`. Ansible installs the helper but never retrieves the value. The deployment-owned `/etc/personalhub/release.env` selects an immutable ECR image and is intentionally outside Ansible ownership so later CI/CD can update releases without changing static host configuration. PostgreSQL data uses a named Docker volume, never the Git checkout or deployment directories.
 
 The base role keeps UTC, starts systemd time synchronization, enables unattended security updates, and limits persistent journald use to 500 MiB or 14 days. It does not install UFW, fail2ban, SSH, monitoring agents, or perform a distribution upgrade.
 

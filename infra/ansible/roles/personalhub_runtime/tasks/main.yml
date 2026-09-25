@@ -1,0 +1,32 @@
+---
+- name: Install the private production Compose definition
+  ansible.builtin.template:
+    src: compose.production.yml.j2
+    dest: "{{ personalhub_root }}/compose/compose.production.yml"
+    owner: root
+    group: "{{ personalhub_runtime_group }}"
+    mode: "0640"
+
+- name: Install the production environment materializer
+  ansible.builtin.copy:
+    src: personalhub-materialize-runtime-env.py
+    dest: /usr/local/sbin/personalhub-materialize-runtime-env
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the ECR login helper
+  ansible.builtin.template:
+    src: personalhub-ecr-login.j2
+    dest: /usr/local/sbin/personalhub-ecr-login
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the production Compose wrapper
+  ansible.builtin.template:
+    src: personalhub-compose.j2
+    dest: /usr/local/sbin/personalhub-compose
+    owner: root
+    group: root
+    mode: "0750"

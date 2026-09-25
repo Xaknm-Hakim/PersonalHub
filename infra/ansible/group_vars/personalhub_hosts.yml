@@ -5,7 +5,12 @@ personalhub_root: /opt/personalhub
 personalhub_config_root: /etc/personalhub
 personalhub_aws_region: ap-southeast-1
 personalhub_ecr_repository: personalhub-production
+personalhub_ecr_registry: 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
 personalhub_backup_bucket: personalhub-production-210855481769-pg-backups
+personalhub_postgres_image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+personalhub_database_name: personalhub
+personalhub_database_user: personalhub
+personalhub_time_zone: Asia/Kuala_Lumpur
 personalhub_aws_cli_version: 2.36.0
 personalhub_aws_cli_sha256: bd8d3f33ffe615fa208cc828bc915d6a944f25bfbb3f777510a43336aa876a3b
 

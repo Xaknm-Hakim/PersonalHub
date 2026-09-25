@@ -37,5 +37,5 @@
     path: "{{ personalhub_config_root }}"
     state: directory
     owner: root
-    group: "{{ personalhub_runtime_group }}"
-    mode: "0750"
+    group: root
+    mode: "0700"

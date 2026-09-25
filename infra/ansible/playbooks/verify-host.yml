@@ -92,8 +92,8 @@
           mode: "0750"
         - path: /etc/personalhub
           owner: root
-          group: personalhub
-          mode: "0750"
+          group: root
+          mode: "0700"
       register: personalhub_directories
 
     - name: Verify PersonalHub directory ownership and modes
@@ -125,36 +125,33 @@
       register: aws_cli_version
       changed_when: false
 
-    - name: List running containers
-      ansible.builtin.command: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
+    - name: List running PersonalHub Compose services
+      ansible.builtin.command: >-
+        docker ps
+        --filter label=com.docker.compose.project=personalhub
+        --format '{{ "{{" }}.Label "com.docker.compose.service"{{ "}}" }}'
       register: running_containers
       changed_when: false
 
-    - name: Verify no application containers are running
+    - name: Verify only the private application services are running
       ansible.builtin.assert:
         that:
-          - running_containers.stdout_lines | length == 0
+          - running_containers.stdout_lines | sort == ["app", "postgres"]
 
-    - name: Check for PostgreSQL and cloudflared processes
+    - name: Check for cloudflared processes
       ansible.builtin.command:
         argv:
           - /usr/bin/pgrep
           - --exact
-          - "{{ item }}"
-      loop:
-        - postgres
-        - cloudflared
-      register: prohibited_processes
+          - cloudflared
+      register: cloudflared_process
       changed_when: false
-      failed_when: prohibited_processes.rc not in [0, 1]
+      failed_when: cloudflared_process.rc not in [0, 1]
 
-    - name: Verify PostgreSQL and cloudflared are not running
+    - name: Verify cloudflared remains absent
       ansible.builtin.assert:
         that:
-          - item.rc == 1
-      loop: "{{ prohibited_processes.results }}"
-      loop_control:
-        label: "{{ item.item }}"
+          - cloudflared_process.rc == 1
 
     - name: Verify ECR authorization through the instance role
       ansible.builtin.command:
@@ -213,7 +210,7 @@
         that:
           - >-
             listening_sockets.stdout is not
-            search('(?:0\\.0\\.0\\.0|\\[::\\]):(?:22|80|443|3000|3001|5432)')
+            search(':(?:22|80|443|3000|3001|3002|5432)\\b')
 
     - name: Check whether Ubuntu requests a reboot
       ansible.builtin.stat:

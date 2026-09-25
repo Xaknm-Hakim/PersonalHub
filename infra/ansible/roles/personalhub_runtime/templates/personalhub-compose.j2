@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  printf '%s\n' 'PersonalHub Compose operations require root' >&2
+  exit 1
+fi
+
+release_env={{ personalhub_config_root }}/release.env
+runtime_env={{ personalhub_config_root }}/runtime.env
+compose_file={{ personalhub_root }}/compose/compose.production.yml
+
+for required_file in "$release_env" "$runtime_env" "$compose_file"; do
+  if [ ! -r "$required_file" ]; then
+    printf '%s\n' 'PersonalHub runtime configuration is incomplete' >&2
+    exit 1
+  fi
+done
+
+exec /usr/bin/docker compose \
+  --project-name personalhub \
+  --env-file "$release_env" \
+  --env-file "$runtime_env" \
+  --file "$compose_file" \
+  "$@"

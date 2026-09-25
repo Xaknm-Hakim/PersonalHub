@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  printf '%s\n' 'ECR login requires root' >&2
+  exit 1
+fi
+
+/usr/local/bin/aws ecr get-login-password --region {{ personalhub_aws_region }} \
+  | /usr/bin/docker login \
+      --username AWS \
+      --password-stdin \
+      {{ personalhub_ecr_registry }} >/dev/null 2>&1
+
+printf '%s\n' 'ecr-login=PASS'
