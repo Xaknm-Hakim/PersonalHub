@@ -1,4 +1,6 @@
-FROM node:22-slim AS deps
+ARG NODE_IMAGE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf64b9a401094b906d27b29338d4
+
+FROM ${NODE_IMAGE} AS deps
 
 WORKDIR /app
 
@@ -12,7 +14,7 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-slim AS builder
+FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
 
@@ -29,7 +31,7 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:22-slim AS runner
+FROM ${NODE_IMAGE} AS runner
 
 WORKDIR /app
 
