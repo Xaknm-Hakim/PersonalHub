@@ -82,8 +82,8 @@ data "aws_iam_policy_document" "host" {
       "ssm:GetParameters",
     ]
     resources = [
-      aws_ssm_parameter.postgres_password.arn,
-      aws_ssm_parameter.cloudflare_tunnel_token.arn,
+      local.production_parameter_arns.postgres_password,
+      local.production_parameter_arns.cloudflare_tunnel_token,
     ]
   }
 }
