@@ -52,8 +52,11 @@ COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
-RUN chmod +x ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh \
+  && chown -R node:node /app
 
 EXPOSE 3000
+
+USER node
 
 CMD ["./docker-entrypoint.sh"]

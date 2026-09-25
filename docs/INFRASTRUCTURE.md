@@ -12,7 +12,7 @@ The instance receives a public IPv4 because this design deliberately has no NAT 
 
 Administration uses AWS Systems Manager Session Manager and Run Command. The instance role receives AWS-managed `AmazonSSMManagedInstanceCore`; there is no EC2 key pair and SSH is not a fallback. Once the instance is running and its SSM agent has registered, target the `ec2_instance_id` Terraform output with SSM.
 
-Future application images will live in a private, encrypted, scan-on-push ECR repository. Immutable tags and lifecycle cleanup retain up to 30 recent images by default for rollback. This phase grants only the EC2 host permission to authenticate to ECR and pull from that repository. It does not create GitHub OIDC or image-push permissions.
+Production application images live in the private, encrypted, scan-on-push ECR repository `210855481769.dkr.ecr.ap-southeast-1.amazonaws.com/personalhub-production`. Each release is an ARM64 Linux image tagged with the exact source commit SHA; `latest` is not a deployment identity. ECR rejects tag replacement, and lifecycle cleanup retains up to 30 recent images for rollback. Images are built and published by a trusted workstation or future CI runner, while the production host only pulls them. The EC2 role can authenticate to and pull from this repository but cannot push. GitHub OIDC and automated publication remain deferred.
 
 A future Cloudflare Tunnel process will create outbound connections on ports 443 or 7844 and provide application ingress without opening the EC2 security group. Cloudflare and application runtime configuration are intentionally deferred.
 
@@ -126,6 +126,27 @@ aws ssm start-session --target "${INSTANCE_ID}"
 ```
 
 The first command must return `Online`. Failure to register is an IAM, agent, DNS, routing, or outbound-connectivity problem; do not add SSH ingress as a workaround.
+
+## Manual production image publication
+
+Until CI/CD replaces this procedure, publish from a clean, fully validated commit on a trusted workstation. The target is `linux/arm64`, matching the Graviton production host. On an x86-64 workstation, Docker Buildx therefore requires registered ARM64 QEMU/binfmt support; use the standard Buildx-supported binfmt installer rather than building on EC2. Never pass production secrets as build arguments or include local environment, database, backup, or Git files in the build context.
+
+```text
+GIT_SHA=$(git rev-parse HEAD)
+ECR_REPOSITORY=210855481769.dkr.ecr.ap-southeast-1.amazonaws.com/personalhub-production
+
+aws ecr get-login-password --region ap-southeast-1 \
+  | docker login --username AWS --password-stdin 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
+
+docker buildx build \
+  --platform linux/arm64 \
+  --label "org.opencontainers.image.revision=${GIT_SHA}" \
+  --tag "${ECR_REPOSITORY}:${GIT_SHA}" \
+  --load .
+docker push "${ECR_REPOSITORY}:${GIT_SHA}"
+```
+
+Before pushing, verify that the full SHA tag does not already exist, inspect the local image platform, command, history, and contents, and perform a disposable smoke test when practical. After pushing, verify the digest, manifest platform, scan result, repository immutability, and lifecycle policy through ECR. Production deployment must refer to the immutable SHA tag or its digest; the host pulls an approved image and never builds source.
 
 ## Expected AWS cost surfaces
 
