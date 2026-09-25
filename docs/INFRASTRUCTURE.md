@@ -39,6 +39,8 @@ Their values enter Terraform only through ephemeral, sensitive input variables a
 
 The EC2 role can call only `ssm:GetParameter` and `ssm:GetParameters` on those two exact parameter ARNs. It has no wildcard Parameter Store access. The owner bootstrap password is deliberately excluded because it is a one-time interactive input, not a deployment secret.
 
+The initial PostgreSQL password is generated locally with a cryptographically secure URL-safe generator and exists outside AWS only for the ephemeral Terraform handoff. The existing Cloudflare Tunnel token is read from a temporary owner-only file for the same handoff; that file is removed only after AWS confirms the parameter and the EC2 role proves it can retrieve it. Rotate either secret by supplying a new ephemeral value and incrementing only its corresponding write-only version. A future runtime phase may retrieve these parameters with the instance role and atomically materialize the minimum root-owned, mode-0600 configuration under `/etc/personalhub`; Terraform and Ansible variables must never contain the plaintext. Cloudflare tunnel/DNS configuration, PostgreSQL startup, Compose configuration, and owner initialization remain outside this secret-foundation phase.
+
 ## Prerequisites
 
 - Terraform 1.11 or newer (required for ephemeral variables and write-only provider arguments; native S3 lockfiles require 1.10 or newer)

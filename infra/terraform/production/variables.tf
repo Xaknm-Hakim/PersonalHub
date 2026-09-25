@@ -123,7 +123,7 @@ variable "production_postgres_password" {
 variable "production_postgres_password_version" {
   description = "Increment to intentionally rotate the write-only PostgreSQL password."
   type        = number
-  default     = 1
+  default     = 2
 
   validation {
     condition     = var.production_postgres_password_version >= 1 && floor(var.production_postgres_password_version) == var.production_postgres_password_version
