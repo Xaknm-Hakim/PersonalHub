@@ -146,7 +146,7 @@ variable "production_cloudflare_tunnel_token" {
 variable "production_cloudflare_tunnel_token_version" {
   description = "Increment to intentionally rotate the write-only Cloudflare Tunnel token."
   type        = number
-  default     = 1
+  default     = 2
 
   validation {
     condition     = var.production_cloudflare_tunnel_token_version >= 1 && floor(var.production_cloudflare_tunnel_token_version) == var.production_cloudflare_tunnel_token_version
