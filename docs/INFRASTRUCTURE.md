@@ -4,7 +4,9 @@ This directory contains the Terraform state bootstrap, the AWS foundation, the A
 
 ## Architecture
 
-The production stack creates one dedicated VPC (`10.42.0.0/16` by default) with one public subnet, an Internet Gateway, and a public route. One ARM64 `t4g.small` instance runs the current Canonical Ubuntu 24.04 LTS ARM64 AMI discovered at plan time. Its encrypted gp3 root disk defaults to 25 GiB.
+The production stack creates one dedicated VPC (`10.42.0.0/16` by default) with one public subnet, an Internet Gateway, and a public route. One ARM64 `t4g.small` instance runs the explicitly pinned Canonical Ubuntu 24.04 LTS ARM64 AMI selected by `ec2_ami_id`. Terraform validates that exact image against Canonical ownership, Noble naming, ARM64 architecture, EBS root storage, and HVM virtualization. Its encrypted gp3 root disk defaults to 25 GiB.
+
+Publishing a newer Canonical image does not automatically rebuild PersonalHub. An AMI upgrade is a reviewed maintenance event: select and verify a newer Ubuntu 24.04 ARM64 image, update `ec2_ami_id`, confirm current PostgreSQL backups are usable, and review the resulting EC2 replacement plan before deliberately rebuilding the disposable host. Never combine an AMI replacement with an unrelated infrastructure or application change.
 
 The instance receives a public IPv4 because this design deliberately has no NAT Gateway: the address gives the host direct, instance-initiated access to SSM, ECR, package repositories, and later Cloudflare Tunnel endpoints. It does not make a service reachable. The attached security group has no ingress rules—no SSH, HTTP, HTTPS, or PostgreSQL—and only explicit outbound DNS, HTTP, HTTPS, and future Cloudflare Tunnel transport rules.
 

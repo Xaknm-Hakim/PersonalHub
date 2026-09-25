@@ -42,6 +42,17 @@ variable "instance_type" {
   }
 }
 
+variable "ec2_ami_id" {
+  description = "Explicit Canonical Ubuntu 24.04 ARM64 AMI for the production host; changing it is a reviewed replacement event."
+  type        = string
+  default     = "ami-0f78fc0711eeb6f28"
+
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{8,17}$", var.ec2_ami_id))
+    error_message = "ec2_ami_id must be a valid AMI ID."
+  }
+}
+
 variable "vpc_cidr" {
   description = "IPv4 CIDR for the dedicated PersonalHub VPC."
   type        = string

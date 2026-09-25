@@ -1,6 +1,11 @@
 data "aws_ami" "ubuntu_arm64" {
-  most_recent = true
+  most_recent = false
   owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "image-id"
+    values = [var.ec2_ami_id]
+  }
 
   filter {
     name   = "name"
