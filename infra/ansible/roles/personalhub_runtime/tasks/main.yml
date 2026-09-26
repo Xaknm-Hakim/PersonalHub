@@ -38,3 +38,50 @@
     owner: root
     group: root
     mode: "0750"
+
+- name: Create the protected PostgreSQL backup workspace
+  ansible.builtin.file:
+    path: "{{ personalhub_backup_work_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the production PostgreSQL backup helper
+  ansible.builtin.template:
+    src: personalhub-postgres-backup.py.j2
+    dest: /usr/local/sbin/personalhub-postgres-backup
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the production PostgreSQL backup service
+  ansible.builtin.template:
+    src: personalhub-postgres-backup.service.j2
+    dest: /etc/systemd/system/personalhub-postgres-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: personalhub_runtime_backup_service_unit
+
+- name: Install the production PostgreSQL backup timer
+  ansible.builtin.template:
+    src: personalhub-postgres-backup.timer.j2
+    dest: /etc/systemd/system/personalhub-postgres-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: personalhub_runtime_backup_timer_unit
+
+- name: Reload systemd for PostgreSQL backup unit changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: >-
+    personalhub_runtime_backup_service_unit.changed or
+    personalhub_runtime_backup_timer_unit.changed
+
+- name: Enable and start the production PostgreSQL backup timer
+  ansible.builtin.systemd_service:
+    name: personalhub-postgres-backup.timer
+    enabled: true
+    state: started

@@ -90,6 +90,10 @@
           owner: personalhub
           group: personalhub
           mode: "0750"
+        - path: /opt/personalhub/backups/scheduled-work
+          owner: root
+          group: root
+          mode: "0700"
         - path: /etc/personalhub
           owner: root
           group: root
@@ -253,6 +257,72 @@
           - "1"
       register: backup_bucket_list
       changed_when: false
+
+    - name: Read PostgreSQL backup mechanism metadata
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - path: /usr/local/sbin/personalhub-postgres-backup
+          mode: "0750"
+        - path: /etc/systemd/system/personalhub-postgres-backup.service
+          mode: "0644"
+        - path: /etc/systemd/system/personalhub-postgres-backup.timer
+          mode: "0644"
+      register: backup_mechanism_files
+
+    - name: Verify PostgreSQL backup mechanism protection
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - item.stat.pw_name == "root"
+          - item.stat.gr_name == "root"
+          - item.stat.mode == item.item.mode
+      loop: "{{ backup_mechanism_files.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Read PostgreSQL backup timer state
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - personalhub-postgres-backup.timer
+          - --property=ActiveState
+          - --property=UnitFileState
+          - --property=NextElapseUSecRealtime
+          - --property=Persistent
+      register: backup_timer_state
+      changed_when: false
+
+    - name: Read PostgreSQL backup service result
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - show
+          - personalhub-postgres-backup.service
+          - --property=ActiveState
+          - --property=Result
+          - --property=ExecMainStatus
+          - --property=ExecMainStartTimestamp
+          - --property=NRestarts
+      register: backup_service_state
+      changed_when: false
+
+    - name: Verify PostgreSQL backup scheduling and last result
+      ansible.builtin.assert:
+        that:
+          - backup_timer_state.stdout is search('ActiveState=active')
+          - backup_timer_state.stdout is search('UnitFileState=enabled')
+          - backup_timer_state.stdout is search('Persistent=yes')
+          - backup_timer_state.stdout is search('NextElapseUSecRealtime=.+')
+          - backup_service_state.stdout is search('ActiveState=inactive')
+          - backup_service_state.stdout is search('Result=success')
+          - backup_service_state.stdout is search('ExecMainStatus=0')
+          - backup_service_state.stdout is search('ExecMainStartTimestamp=.+')
+          - backup_service_state.stdout is search('NRestarts=0')
+          - >-
+            ((backup_bucket_list.stdout | from_json).Contents |
+            default([]) | length) > 0
 
     - name: Read listening sockets
       ansible.builtin.command: ss -H -lntup

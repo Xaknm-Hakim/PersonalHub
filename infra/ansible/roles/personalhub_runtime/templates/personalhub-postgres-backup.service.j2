@@ -1,0 +1,40 @@
+[Unit]
+Description=Back up the PersonalHub PostgreSQL database to S3
+Documentation=https://github.com/Xaknm-Hakim/PersonalHub/blob/main/docs/PRODUCTION.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+SupplementaryGroups={{ personalhub_runtime_group }}
+UMask=0077
+RuntimeDirectory=personalhub-postgres-backup
+RuntimeDirectoryMode=0700
+Environment=HOME=/run/personalhub-postgres-backup
+Environment=DOCKER_CONFIG=/run/personalhub-postgres-backup
+ExecStart=/usr/local/sbin/personalhub-postgres-backup
+TimeoutStartSec=30min
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths={{ personalhub_backup_work_root }}
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

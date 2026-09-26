@@ -1,0 +1,230 @@
+#!/usr/bin/python3
+"""Create and durably verify one production PostgreSQL backup."""
+
+from __future__ import annotations
+
+import base64
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+from datetime import UTC, datetime
+
+AWS = "/usr/local/bin/aws"
+COMPOSE = "/usr/local/sbin/personalhub-compose"
+DOCKER = "/usr/bin/docker"
+REGION = "{{ personalhub_aws_region }}"
+BUCKET = "{{ personalhub_backup_bucket }}"
+PREFIX = "{{ personalhub_backup_prefix }}".strip("/")
+WORK_ROOT = Path("{{ personalhub_backup_work_root }}")
+DATABASE = "{{ personalhub_database_name }}"
+DATABASE_USER = "{{ personalhub_database_user }}"
+CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
+
+
+class BackupError(Exception):
+    """An expected backup failure with a safe stage label."""
+
+    def __init__(self, stage: str) -> None:
+        super().__init__(stage)
+        self.stage = stage
+
+
+def run_checked(argv: list[str], stage: str, *, stdin=None) -> subprocess.CompletedProcess[bytes]:
+    try:
+        result = subprocess.run(
+            argv,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except OSError as error:
+        raise BackupError(stage) from error
+    if result.returncode != 0:
+        raise BackupError(stage)
+    return result
+
+
+def require_healthy_postgres(container_id: str, stage: str) -> None:
+    result = run_checked([DOCKER, "inspect", container_id], stage)
+    try:
+        container = json.loads(result.stdout)[0]
+        state = container["State"]
+        healthy = state["Status"] == "running" and state["Health"]["Status"] == "healthy"
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise BackupError(stage) from error
+    if not healthy:
+        raise BackupError(stage)
+
+
+def stop_on_signal(_signum: int, _frame: object) -> None:
+    raise BackupError("interrupted")
+
+
+def main() -> int:
+    os.umask(0o077)
+    started = time.monotonic()
+    stage = "initialization"
+    WORK_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(WORK_ROOT, 0o700)
+
+    lock_path = WORK_ROOT / "backup.lock"
+    with lock_path.open("a+b") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise BackupError("concurrent-run") from error
+
+        stage = "postgres-discovery"
+        container_id = run_checked([COMPOSE, "ps", "-q", "postgres"], stage).stdout.decode().strip()
+        if not CONTAINER_ID_PATTERN.fullmatch(container_id):
+            raise BackupError(stage)
+        require_healthy_postgres(container_id, "postgres-preflight")
+
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        filename = f"personalhub-{stamp}.dump"
+        key = f"{PREFIX}/{filename}"
+
+        with tempfile.TemporaryDirectory(prefix="run-", dir=WORK_ROOT) as temporary_directory:
+            archive = Path(temporary_directory) / filename
+
+            stage = "dump"
+            with archive.open("xb") as output_file:
+                dump = subprocess.run(
+                    [
+                        DOCKER,
+                        "exec",
+                        container_id,
+                        "pg_dump",
+                        "-U",
+                        DATABASE_USER,
+                        "--dbname",
+                        DATABASE,
+                        "--format=custom",
+                        "--no-owner",
+                        "--no-privileges",
+                    ],
+                    stdout=output_file,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+            if dump.returncode != 0 or not archive.is_file() or archive.stat().st_size <= 0:
+                raise BackupError(stage)
+            os.chmod(archive, 0o600)
+
+            stage = "archive-validation"
+            with archive.open("rb") as input_file:
+                run_checked(
+                    [DOCKER, "exec", "-i", container_id, "pg_restore", "--list"],
+                    stage,
+                    stdin=input_file,
+                )
+
+            stage = "checksum"
+            digest = hashlib.sha256()
+            with archive.open("rb") as input_file:
+                for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            checksum_hex = digest.hexdigest()
+            checksum_base64 = base64.b64encode(digest.digest()).decode("ascii")
+            archive_size = archive.stat().st_size
+
+            require_healthy_postgres(container_id, "postgres-postflight")
+
+            stage = "upload"
+            run_checked(
+                [
+                    AWS,
+                    "s3api",
+                    "put-object",
+                    "--region",
+                    REGION,
+                    "--bucket",
+                    BUCKET,
+                    "--key",
+                    key,
+                    "--if-none-match",
+                    "*",
+                    "--body",
+                    str(archive),
+                    "--server-side-encryption",
+                    "AES256",
+                    "--checksum-algorithm",
+                    "SHA256",
+                    "--metadata",
+                    f"sha256={checksum_hex},archive-validation=pg-restore-list",
+                    "--output",
+                    "json",
+                ],
+                stage,
+            )
+
+            stage = "durable-verification"
+            head = run_checked(
+                [
+                    AWS,
+                    "s3api",
+                    "head-object",
+                    "--region",
+                    REGION,
+                    "--bucket",
+                    BUCKET,
+                    "--key",
+                    key,
+                    "--checksum-mode",
+                    "ENABLED",
+                    "--output",
+                    "json",
+                ],
+                stage,
+            )
+            try:
+                metadata = json.loads(head.stdout)
+                verified = (
+                    metadata["ContentLength"] == archive_size
+                    and metadata["ServerSideEncryption"] == "AES256"
+                    and metadata["Metadata"]["sha256"] == checksum_hex
+                    and metadata["ChecksumSHA256"] == checksum_base64
+                )
+            except (KeyError, TypeError, json.JSONDecodeError) as error:
+                raise BackupError(stage) from error
+            if not verified:
+                raise BackupError(stage)
+
+            duration = time.monotonic() - started
+            print(f"backup-timestamp={stamp}")
+            print(f"backup-object=s3://{BUCKET}/{key}")
+            print(f"backup-size-bytes={archive_size}")
+            print(f"backup-sha256={checksum_hex}")
+            print(f"backup-duration-seconds={duration:.3f}")
+            print("backup-result=PASS")
+
+    return 0
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, stop_on_signal)
+    signal.signal(signal.SIGTERM, stop_on_signal)
+    try:
+        raise SystemExit(main())
+    except BackupError as error:
+        print(f"backup-result=FAIL stage={error.stage}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as error:
+        error_frame = traceback.extract_tb(error.__traceback__)[-1]
+        print(
+            "backup-result=FAIL stage=unexpected "
+            f"error-type={type(error).__name__} "
+            f"error-source={Path(error_frame.filename).name}:{error_frame.lineno}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)

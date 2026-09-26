@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the PersonalHub PostgreSQL backup daily
+Documentation=https://github.com/Xaknm-Hakim/PersonalHub/blob/main/docs/PRODUCTION.md
+
+[Timer]
+OnCalendar={{ personalhub_backup_schedule }}
+Persistent=true
+AccuracySec=1min
+Unit=personalhub-postgres-backup.service
+
+[Install]
+WantedBy=timers.target
