@@ -33,6 +33,11 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.personalhub.repository_url
 }
 
+output "github_build_role_arn" {
+  description = "ARN assumed by the main-branch GitHub Actions image publication workflow."
+  value       = aws_iam_role.github_build.arn
+}
+
 output "postgres_backup_bucket_name" {
   description = "Name of the private bucket reserved for PostgreSQL backups."
   value       = aws_s3_bucket.postgres_backups.id
