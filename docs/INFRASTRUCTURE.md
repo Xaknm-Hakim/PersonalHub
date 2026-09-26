@@ -12,7 +12,7 @@ The instance receives a public IPv4 because this design deliberately has no NAT 
 
 Administration uses AWS Systems Manager Session Manager and Run Command. The instance role receives AWS-managed `AmazonSSMManagedInstanceCore`; there is no EC2 key pair and SSH is not a fallback. Once the instance is running and its SSM agent has registered, target the `ec2_instance_id` Terraform output with SSM.
 
-Production application images live in the private, encrypted, scan-on-push ECR repository `210855481769.dkr.ecr.ap-southeast-1.amazonaws.com/personalhub-production`. Each release is an ARM64 Linux image tagged with the exact source commit SHA; `latest` is not a deployment identity. ECR rejects tag replacement, and lifecycle cleanup retains up to 30 recent images for rollback. Images are built and published by a trusted workstation or future CI runner, while the production host only pulls them. The EC2 role can authenticate to and pull from this repository but cannot push. GitHub OIDC and automated publication remain deferred.
+Production application images live in the private, encrypted, scan-on-push ECR repository `210855481769.dkr.ecr.ap-southeast-1.amazonaws.com/personalhub-production`. Each release is an ARM64 Linux image tagged with the exact source commit SHA; `latest` is not a deployment identity. ECR rejects tag replacement, and lifecycle cleanup retains up to 30 recent images for rollback. Phase 2C.1 allows a narrowly trusted GitHub Actions role to publish validated ARM64 candidate artifacts through OIDC without static credentials. The production host only pulls the image explicitly selected by the operator. The EC2 role cannot push, and the GitHub build role cannot deploy. See `docs/CI-CD.md`.
 
 The production runtime is documented in `docs/PRODUCTION.md`. Cloudflared creates outbound connections on ports 443 or 7844 and provides the sole application ingress path without opening the EC2 security group. The remotely managed `personalhub-prod` tunnel is intended to route `personalhub.studexhub.com` to the internal origin `http://app:3000`; Cloudflare dashboard configuration, not Terraform, owns and activates the public-hostname route.
 
@@ -102,7 +102,7 @@ terraform plan -out=production.tfplan
 terraform apply production.tfplan
 ```
 
-The production stack manages 36 resources after the Ansible transport and production-secret amendments:
+The production stack manages 39 resources after the Ansible transport, production-secret, and GitHub publication amendments:
 
 - networking (13): VPC, Internet Gateway, subnet, route table, default route, route-table association, zero-ingress security group, and six explicit egress rules;
 - IAM (4): EC2 role, SSM managed-policy attachment, least-privilege inline ECR/backup policy, and instance profile;
@@ -110,6 +110,7 @@ The production stack manages 36 resources after the Ansible transport and produc
 - backup storage (7): S3 bucket, ownership controls, public-access block, versioning, encryption, lifecycle configuration, and TLS-enforcement policy;
 - Ansible transport (7): non-versioned S3 bucket, ownership controls, public-access block, encryption, one-day lifecycle cleanup, TLS-enforcement policy, and an unattached least-privilege controller policy;
 - production secrets (2): write-only SSM SecureString parameters for the PostgreSQL password and existing Cloudflare Tunnel token;
+- GitHub publication identity (3): account-level GitHub Actions OIDC provider, main-branch build role, and repository-scoped ECR publication policy;
 - compute (1): ARM64 EC2 instance with its encrypted root EBS volume managed as part of the instance resource.
 
 Useful outputs include the VPC and subnet IDs, security group ID, instance ID and public IP, ECR repository URL, backup and Ansible-transfer bucket names, controller policy ARN, IAM role name, and region. Outputs contain no secrets.

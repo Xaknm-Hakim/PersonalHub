@@ -1,0 +1,336 @@
+name: Publish immutable ARM64 image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-image-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: arn:aws:iam::210855481769:role/personalhub-production-github-build
+  ECR_REGISTRY: 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
+  ECR_REPOSITORY: personalhub-production
+
+jobs:
+  validate-build-publish:
+    name: Validate, build, and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      # Actions are pinned to immutable upstream commit SHAs; Dependabot can review updates.
+      - name: Require the intended main branch context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+
+      - name: Check out the exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run disposable PostgreSQL integration tests
+        run: npm run test:integration
+
+      - name: Lint and type-check source
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run format:check
+
+      - name: Validate and generate Prisma Client
+        env:
+          PERSONALHUB_DATABASE_URL: postgresql://build:ci-placeholder@localhost:5432/build
+        run: |
+          npm run prisma:validate
+          npm run prisma:generate
+
+      - name: Build production application
+        env:
+          PERSONALHUB_DATABASE_URL: postgresql://build:ci-placeholder@localhost:5432/build
+        run: npm run build
+
+      - name: Install the reviewed Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run disposable production browser tests
+        run: npm run test:browser
+
+      - name: Verify tracked-file whitespace
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+      - name: Configure temporary AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: PersonalHubGitHubBuild-${{ github.run_id }}
+          output-credentials: false
+
+      - name: Verify assumed role identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          arn=$(aws sts get-caller-identity --query Arn --output text)
+          case "$arn" in
+            arn:aws:sts::210855481769:assumed-role/personalhub-production-github-build/*) ;;
+            *) exit 1 ;;
+          esac
+          printf 'assumed-role=personalhub-production-github-build\n'
+
+      - name: Reject an existing immutable Git SHA tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          result=$(aws ecr describe-images \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$GITHUB_SHA" 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            printf 'The immutable image tag already exists; refusing overwrite.\n' >&2
+            exit 1
+          fi
+          case "$result" in
+            *ImageNotFoundException*) ;;
+            *) printf 'Could not safely establish tag absence.\n' >&2; exit 1 ;;
+          esac
+
+      - name: Log in to private ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build and publish the immutable ARM64 image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Verify digest, ARM64 manifest, and source labels
+        id: artifact
+        shell: bash
+        env:
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image="$ECR_REGISTRY/$ECR_REPOSITORY"
+          details=$(aws ecr describe-images \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          test "$details" = "$INDEX_DIGEST"
+          test "$(aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names "$ECR_REPOSITORY" \
+            --query 'repositories[0].imageTagMutability' \
+            --output text)" = "IMMUTABLE"
+
+          docker buildx imagetools inspect "$image@$INDEX_DIGEST" --raw > /tmp/personalhub-index.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads(Path('/tmp/personalhub-index.json').read_text())
+          candidates = [
+              item for item in manifest.get('manifests', [])
+              if item.get('platform', {}).get('os') == 'linux'
+              and item.get('platform', {}).get('architecture') == 'arm64'
+          ]
+          if len(candidates) != 1:
+              raise SystemExit('Expected exactly one linux/arm64 image manifest.')
+          digest = candidates[0]['digest']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'arm64_digest={digest}\n')
+          print('platform=linux/arm64')
+          PY
+
+          arm_digest=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('/tmp/personalhub-index.json').read_text())
+          print(next(item['digest'] for item in manifest['manifests'] if item.get('platform', {}).get('os') == 'linux' and item.get('platform', {}).get('architecture') == 'arm64'))
+          PY
+          )
+          docker buildx imagetools inspect "$image@$arm_digest" --raw > /tmp/personalhub-arm64-manifest.json
+          config_digest=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path('/tmp/personalhub-arm64-manifest.json').read_text())['config']['digest'])
+          PY
+          )
+          config_url=$(aws ecr get-download-url-for-layer \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --layer-digest "$config_digest" \
+            --query downloadUrl \
+            --output text)
+          curl -fsSL "$config_url" -o /tmp/personalhub-config.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = json.loads(Path('/tmp/personalhub-config.json').read_text())
+          labels = config.get('config', {}).get('Labels', {})
+          if labels.get('org.opencontainers.image.revision') != os.environ['GITHUB_SHA']:
+              raise SystemExit('Image revision label mismatch.')
+          expected_source = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+          if labels.get('org.opencontainers.image.source') != expected_source:
+              raise SystemExit('Image source label mismatch.')
+          print('source-labels=PASS')
+          PY
+
+          export IMAGE="$image" ARM64_DIGEST="$arm_digest"
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+          from pathlib import Path
+
+          image = os.environ['IMAGE']
+          arm_digest = os.environ['ARM64_DIGEST']
+          repository = os.environ['ECR_REPOSITORY']
+          region = os.environ['AWS_REGION']
+          index = json.loads(Path('/tmp/personalhub-index.json').read_text())
+          attestations = [
+              item for item in index.get('manifests', [])
+              if item.get('annotations', {}).get('vnd.docker.reference.digest') == arm_digest
+              and item.get('annotations', {}).get('vnd.docker.reference.type') == 'attestation-manifest'
+          ]
+          if not attestations:
+              raise SystemExit('No attestation manifest refers to the ARM64 image manifest.')
+
+          expected_subject = arm_digest.removeprefix('sha256:')
+          found_provenance = False
+          found_sbom = False
+          for descriptor in attestations:
+              raw = subprocess.check_output(
+                  ['docker', 'buildx', 'imagetools', 'inspect', f"{image}@{descriptor['digest']}", '--raw'],
+                  text=True,
+              )
+              manifest = json.loads(raw)
+              for layer in manifest.get('layers', []):
+                  predicate_type = layer.get('annotations', {}).get('in-toto.io/predicate-type', '')
+                  if not (
+                      predicate_type.startswith('https://slsa.dev/provenance/')
+                      or predicate_type == 'https://spdx.dev/Document'
+                  ):
+                      continue
+                  url = subprocess.check_output(
+                      [
+                          'aws', 'ecr', 'get-download-url-for-layer',
+                          '--region', region,
+                          '--repository-name', repository,
+                          '--layer-digest', layer['digest'],
+                          '--query', 'downloadUrl',
+                          '--output', 'text',
+                      ],
+                      text=True,
+                  ).strip()
+                  with urllib.request.urlopen(url) as response:
+                      statement = json.load(response)
+                  if statement.get('_type') != 'https://in-toto.io/Statement/v0.1':
+                      raise SystemExit('Unexpected attestation statement type.')
+                  if not any(
+                      subject.get('digest', {}).get('sha256') == expected_subject
+                      for subject in statement.get('subject', [])
+                  ):
+                      raise SystemExit('Attestation subject does not match the ARM64 manifest.')
+                  if predicate_type.startswith('https://slsa.dev/provenance/'):
+                      if not statement.get('predicate', {}).get('builder', {}).get('id'):
+                          raise SystemExit('Provenance does not identify its builder.')
+                      found_provenance = True
+                  elif predicate_type == 'https://spdx.dev/Document':
+                      found_sbom = True
+
+          if not found_provenance:
+              raise SystemExit('SLSA provenance attestation is missing.')
+          if not found_sbom:
+              raise SystemExit('SPDX SBOM attestation is missing.')
+          print('provenance-attestation=PASS')
+          print('sbom-attestation=PASS')
+          PY
+          printf 'index-digest=%s\n' "$INDEX_DIGEST"
+          printf 'arm64-digest=%s\n' "$arm_digest"
+
+      - name: Wait for ECR scan and enforce the Critical gate
+        shell: bash
+        env:
+          ARM64_DIGEST: ${{ steps.artifact.outputs.arm64_digest }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, time
+
+          repository = os.environ['ECR_REPOSITORY']
+          region = os.environ['AWS_REGION']
+          digest = os.environ['ARM64_DIGEST']
+          findings = None
+          for _ in range(60):
+              result = subprocess.run(
+                  [
+                      'aws', 'ecr', 'describe-image-scan-findings',
+                      '--region', region,
+                      '--repository-name', repository,
+                      '--image-id', f'imageDigest={digest}',
+                      '--output', 'json',
+                  ],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+                  check=False,
+              )
+              if result.returncode == 0:
+                  payload = json.loads(result.stdout)
+                  status = payload['imageScanStatus']['status']
+                  if status == 'COMPLETE':
+                      findings = payload['imageScanFindings'].get('findingSeverityCounts', {})
+                      break
+                  if status == 'FAILED':
+                      raise SystemExit('ECR image scan failed.')
+              time.sleep(10)
+          if findings is None:
+              raise SystemExit('ECR image scan did not complete within ten minutes.')
+          counts = {severity: int(findings.get(severity, 0)) for severity in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')}
+          print('scan-counts=' + json.dumps(counts, sort_keys=True))
+          if counts['CRITICAL'] != 0:
+              raise SystemExit('Critical ECR findings block publication verification.')
+          PY
+
+      - name: Remove temporary verification files
+        if: always()
+        run: rm -f /tmp/personalhub-index.json /tmp/personalhub-arm64-manifest.json /tmp/personalhub-config.json
