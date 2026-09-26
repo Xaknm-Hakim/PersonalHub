@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Application gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      # Actions are pinned to immutable upstream commit SHAs; Dependabot can review updates.
+      - name: Check out the exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run disposable PostgreSQL integration tests
+        run: npm run test:integration
+
+      - name: Lint source
+        run: npm run lint
+
+      - name: Type-check source
+        run: npm run typecheck
+
+      - name: Verify formatting
+        run: npm run format:check
+
+      - name: Validate Prisma schema
+        env:
+          PERSONALHUB_DATABASE_URL: postgresql://build:ci-placeholder@localhost:5432/build
+        run: npm run prisma:validate
+
+      - name: Generate Prisma Client
+        env:
+          PERSONALHUB_DATABASE_URL: postgresql://build:ci-placeholder@localhost:5432/build
+        run: npm run prisma:generate
+
+      - name: Build production application
+        env:
+          PERSONALHUB_DATABASE_URL: postgresql://build:ci-placeholder@localhost:5432/build
+        run: npm run build
+
+      - name: Install the reviewed Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run disposable production browser tests
+        run: npm run test:browser
+
+      - name: Verify tracked-file whitespace
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
