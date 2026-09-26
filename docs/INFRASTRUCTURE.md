@@ -14,7 +14,7 @@ Administration uses AWS Systems Manager Session Manager and Run Command. The ins
 
 Production application images live in the private, encrypted, scan-on-push ECR repository `210855481769.dkr.ecr.ap-southeast-1.amazonaws.com/personalhub-production`. Each release is an ARM64 Linux image tagged with the exact source commit SHA; `latest` is not a deployment identity. ECR rejects tag replacement, and lifecycle cleanup retains up to 30 recent images for rollback. Images are built and published by a trusted workstation or future CI runner, while the production host only pulls them. The EC2 role can authenticate to and pull from this repository but cannot push. GitHub OIDC and automated publication remain deferred.
 
-The private PostgreSQL and PersonalHub runtime is documented in `docs/PRODUCTION.md`. A future Cloudflare Tunnel process will create outbound connections on ports 443 or 7844 and provide application ingress without opening the EC2 security group. Cloudflare configuration and public hostname routing remain deferred to Phase 2B.4.
+The production runtime is documented in `docs/PRODUCTION.md`. Cloudflared creates outbound connections on ports 443 or 7844 and provides the sole application ingress path without opening the EC2 security group. The remotely managed `personalhub-prod` tunnel is intended to route `personalhub.studexhub.com` to the internal origin `http://app:3000`; Cloudflare dashboard configuration, not Terraform, owns and activates the public-hostname route.
 
 ## Three separate S3 purposes
 

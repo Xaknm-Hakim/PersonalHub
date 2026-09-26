@@ -133,25 +133,79 @@
       register: running_containers
       changed_when: false
 
-    - name: Verify only the private application services are running
+    - name: Verify only the production services are running
       ansible.builtin.assert:
         that:
-          - running_containers.stdout_lines | sort == ["app", "postgres"]
+          - running_containers.stdout_lines | sort == ["app", "cloudflared", "postgres"]
 
-    - name: Check for cloudflared processes
+    - name: Read production container health and network attachments
       ansible.builtin.command:
         argv:
-          - /usr/bin/pgrep
-          - --exact
-          - cloudflared
-      register: cloudflared_process
+          - /usr/bin/docker
+          - inspect
+          - --format
+          - >-
+            {{ "{{" }}json .State{{ "}}" }}|{{ "{{" }}json .NetworkSettings.Networks{{ "}}" }}
+          - "personalhub-{{ item.service }}-1"
+      loop:
+        - service: app
+          networks:
+            - personalhub-production-backend
+        - service: postgres
+          networks:
+            - personalhub-production-backend
+        - service: cloudflared
+          networks:
+            - personalhub-production-backend
+            - personalhub-production-edge
+      register: production_containers
       changed_when: false
-      failed_when: cloudflared_process.rc not in [0, 1]
 
-    - name: Verify cloudflared remains absent
+    - name: Verify production container health and network isolation
       ansible.builtin.assert:
         that:
-          - cloudflared_process.rc == 1
+          - (item.stdout.split('|')[0] | from_json).Status == "running"
+          - (item.stdout.split('|')[0] | from_json).Health.Status == "healthy"
+          - >-
+            ((item.stdout.split('|')[1] | from_json | dict2items |
+            map(attribute='key') | sort) == (item.item.networks | sort))
+      loop: "{{ production_containers.results }}"
+      loop_control:
+        label: "{{ item.item.service }}"
+
+    - name: Read Cloudflare Tunnel token file metadata
+      ansible.builtin.stat:
+        path: /etc/personalhub/cloudflared-token
+      register: cloudflared_token_file
+
+    - name: Verify Cloudflare Tunnel token file protection
+      ansible.builtin.assert:
+        that:
+          - cloudflared_token_file.stat.isreg
+          - cloudflared_token_file.stat.pw_name == "root"
+          - cloudflared_token_file.stat.gr_name == "root"
+          - cloudflared_token_file.stat.mode == "0600"
+
+    - name: Read production Docker network properties
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - network
+          - inspect
+          - "{{ item }}"
+          - --format
+          - '{{ "{{" }}json .Internal{{ "}}" }}'
+      loop:
+        - personalhub-production-backend
+        - personalhub-production-edge
+      register: production_networks
+      changed_when: false
+
+    - name: Verify backend isolation and edge egress
+      ansible.builtin.assert:
+        that:
+          - production_networks.results[0].stdout == "true"
+          - production_networks.results[1].stdout == "false"
 
     - name: Verify ECR authorization through the instance role
       ansible.builtin.command:

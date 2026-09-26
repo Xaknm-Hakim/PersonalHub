@@ -8,6 +8,9 @@ personalhub_ecr_repository: personalhub-production
 personalhub_ecr_registry: 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
 personalhub_backup_bucket: personalhub-production-210855481769-pg-backups
 personalhub_postgres_image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+# yamllint disable rule:line-length
+personalhub_cloudflared_image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+# yamllint enable rule:line-length
 personalhub_database_name: personalhub
 personalhub_database_user: personalhub
 personalhub_time_zone: Asia/Kuala_Lumpur

@@ -64,6 +64,48 @@ services:
         max-size: 10m
         max-file: "3"
 
+  cloudflared:
+    image: "{{ personalhub_cloudflared_image }}"
+    platform: linux/arm64
+    command:
+      - tunnel
+      - --metrics
+      - 127.0.0.1:20241
+      - run
+      - --token-file
+      - /run/secrets/cloudflared-token
+    user: "0:0"
+    volumes:
+      - /etc/personalhub/cloudflared-token:/run/secrets/cloudflared-token:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - backend
+      - edge
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - cloudflared
+        - tunnel
+        - --metrics
+        - 127.0.0.1:20241
+        - ready
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+
 volumes:
   postgres_data:
     name: personalhub-production-postgres-data
@@ -72,3 +114,5 @@ networks:
   backend:
     name: personalhub-production-backend
     internal: true
+  edge:
+    name: personalhub-production-edge

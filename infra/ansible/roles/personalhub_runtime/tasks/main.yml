@@ -15,6 +15,14 @@
     group: root
     mode: "0750"
 
+- name: Install the Cloudflare Tunnel token materializer
+  ansible.builtin.copy:
+    src: personalhub-materialize-cloudflared-token.py
+    dest: /usr/local/sbin/personalhub-materialize-cloudflared-token
+    owner: root
+    group: root
+    mode: "0750"
+
 - name: Install the ECR login helper
   ansible.builtin.template:
     src: personalhub-ecr-login.j2
