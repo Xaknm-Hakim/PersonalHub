@@ -1,6 +1,6 @@
 # PersonalHub Ansible host configuration
 
-Phase 2A configures the Terraform-managed Ubuntu 24.04 ARM64 host. Phase 2B adds the static production-runtime definition and root-only deployment helpers. Ansible does not select an application release, retrieve secrets during convergence, start containers, configure remotely managed Cloudflare hostname routes, initialize the owner, or change AWS infrastructure.
+Phase 2A configures the Terraform-managed Ubuntu 24.04 ARM64 host. Phase 2B adds the static production-runtime definition, root-only deployment helpers, and scheduled PostgreSQL backup mechanism. Ansible does not select an application release, retrieve secrets during convergence, start containers, invoke a backup during convergence, configure remotely managed Cloudflare hostname routes, initialize the owner, or change AWS infrastructure.
 
 ## Controller prerequisites
 
@@ -78,3 +78,25 @@ The Ubuntu image's SSH service and socket are disabled and masked. Systems Manag
 The base role keeps UTC, starts systemd time synchronization, enables unattended security updates, and limits persistent journald use to 500 MiB or 14 days. It does not install UFW, fail2ban, SSH, monitoring agents, or perform a distribution upgrade.
 
 The verification playbook checks ECR authorization without printing or storing the short-lived token and lists only the `postgresql/` backup prefix. A full backup IAM readiness test may upload a harmless object with the instance role, read it back, and then remove every object version with an authorized controller because the deliberately narrow EC2 policy does not include `s3:DeleteObject`. No long-lived AWS credentials are placed on the host.
+
+## Scheduled PostgreSQL backups
+
+The `personalhub_runtime` role installs:
+
+- `/usr/local/sbin/personalhub-postgres-backup` as `root:root` mode `0750`;
+- `/etc/systemd/system/personalhub-postgres-backup.service`;
+- `/etc/systemd/system/personalhub-postgres-backup.timer`;
+- `/opt/personalhub/backups/scheduled-work` as `root:root` mode `0700`.
+
+The timer is enabled for `19:30 UTC` daily (`03:30 Asia/Kuala_Lumpur`) with `Persistent=true`. The one-shot helper runs `pg_dump -Fc` in the PostgreSQL container, validates the archive, records SHA-256 in S3 integrity metadata, uploads through the instance role, verifies the durable object, and removes its temporary file. It writes only safe object, size, checksum, duration, and result fields to the journal.
+
+Convergence never runs the service. After initial installation, deliberately invoke one backup before expecting `playbooks/verify-host.yml` to pass its last-result assertions:
+
+```text
+sudo systemctl start personalhub-postgres-backup.service
+systemctl list-timers personalhub-postgres-backup.timer
+sudo systemctl show personalhub-postgres-backup.service \
+  --property=Result --property=ExecMainStatus --property=NRestarts
+```
+
+Restore rehearsals are operator-run disposable procedures, not Ansible convergence tasks. See `docs/PRODUCTION.md` and `docs/PRODUCTION-RESTORE-REHEARSAL-2026-09-26.md`.
