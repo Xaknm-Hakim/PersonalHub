@@ -1,6 +1,6 @@
 # PersonalHub Ansible host configuration
 
-Phase 2A configures the Terraform-managed Ubuntu 24.04 ARM64 host. Phase 2B adds the static production-runtime definition, root-only deployment helpers, and scheduled PostgreSQL backup mechanism. Ansible does not select an application release, retrieve secrets during convergence, start containers, invoke a backup during convergence, configure remotely managed Cloudflare hostname routes, initialize the owner, or change AWS infrastructure.
+Phase 2A configures the Terraform-managed Ubuntu 24.04 ARM64 host. Phase 2B adds the static production-runtime definition and scheduled PostgreSQL backup mechanism. Phase 2C.2 adds the static transactional deployment helper. Ansible does not select an application release, retrieve secrets during convergence, start containers, invoke a backup or deployment during convergence, configure remotely managed Cloudflare hostname routes, initialize the owner, or change AWS infrastructure.
 
 ## Controller prerequisites
 
@@ -73,7 +73,9 @@ The Ubuntu image's SSH service and socket are disabled and masked. Systems Manag
 /etc/personalhub/           root:root               0700
 ```
 
-`personalhub-materialize-runtime-env` retrieves only the PostgreSQL password through the instance role and writes `/etc/personalhub/runtime.env` atomically as `root:root` mode `0600`. The independent `personalhub-materialize-cloudflared-token` helper retrieves only the Cloudflare Tunnel token and writes `/etc/personalhub/cloudflared-token` with the same ownership and mode. Ansible installs both helpers but never retrieves either value. The deployment-owned `/etc/personalhub/release.env` selects an immutable ECR image and is intentionally outside Ansible ownership so later CI/CD can update releases without changing static host configuration. PostgreSQL data uses a named Docker volume, never the Git checkout or deployment directories.
+`personalhub-materialize-runtime-env` retrieves only the PostgreSQL password through the instance role and writes `/etc/personalhub/runtime.env` atomically as `root:root` mode `0600`. The independent `personalhub-materialize-cloudflared-token` helper retrieves only the Cloudflare Tunnel token and writes `/etc/personalhub/cloudflared-token` with the same ownership and mode. Ansible installs both helpers but never retrieves either value. The deployment-owned `/etc/personalhub/release.env` selects an immutable ECR image and is intentionally outside Ansible ownership so deployment automation can update releases without changing static host configuration. PostgreSQL data uses a named Docker volume, never the Git checkout or deployment directories.
+
+`personalhub-deploy` is installed as `root:root` mode `0750`. It accepts only an exact full Git SHA from the constrained SSM document, requires a successful pre-deployment backup, runs `prisma migrate deploy`, updates `release.env` atomically, and recreates only the app. Failed post-switch health restores the prior application release when possible; PostgreSQL is never restored automatically.
 
 The base role keeps UTC, starts systemd time synchronization, enables unattended security updates, and limits persistent journald use to 500 MiB or 14 days. It does not install UFW, fail2ban, SSH, monitoring agents, or perform a distribution upgrade.
 

@@ -264,6 +264,8 @@
       loop:
         - path: /usr/local/sbin/personalhub-postgres-backup
           mode: "0750"
+        - path: /usr/local/sbin/personalhub-deploy
+          mode: "0750"
         - path: /etc/systemd/system/personalhub-postgres-backup.service
           mode: "0644"
         - path: /etc/systemd/system/personalhub-postgres-backup.timer
@@ -280,6 +282,16 @@
       loop: "{{ backup_mechanism_files.results }}"
       loop_control:
         label: "{{ item.item.path }}"
+
+    - name: Verify the deployment helper has valid Python syntax
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import ast, pathlib;
+            ast.parse(pathlib.Path('/usr/local/sbin/personalhub-deploy').read_text(encoding='utf-8'))
+      changed_when: false
 
     - name: Read PostgreSQL backup timer state
       ansible.builtin.command:

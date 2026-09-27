@@ -1,0 +1,470 @@
+#!/usr/bin/python3
+"""Deploy one immutable PersonalHub release through a bounded transaction."""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from typing import NamedTuple, Protocol
+
+AWS = "/usr/local/bin/aws"
+COMPOSE = "/usr/local/sbin/personalhub-compose"
+CURL = "/usr/bin/curl"
+DOCKER = "/usr/bin/docker"
+ECR_LOGIN = "/usr/local/sbin/personalhub-ecr-login"
+JOURNALCTL = "/usr/bin/journalctl"
+SYSTEMCTL = "/usr/bin/systemctl"
+REGION = "{{ personalhub_aws_region }}"
+ECR_REGISTRY = "{{ personalhub_ecr_registry }}"
+ECR_REPOSITORY = "{{ personalhub_ecr_repository }}"
+IMAGE_REPOSITORY = f"{ECR_REGISTRY}/{ECR_REPOSITORY}"
+EXPECTED_SOURCE = "https://github.com/Xaknm-Hakim/PersonalHub"
+RELEASE_ENV = Path("{{ personalhub_config_root }}/release.env")
+RUNTIME_ENV = Path("{{ personalhub_config_root }}/runtime.env")
+COMPOSE_FILE = Path("{{ personalhub_root }}/compose/compose.production.yml")
+LOCK_FILE = Path("/run/lock/personalhub-deploy.lock")
+BACKUP_SERVICE = "personalhub-postgres-backup.service"
+BACKUP_URI_PATTERN = re.compile(
+    r"^s3://{{ personalhub_backup_bucket }}/{{ personalhub_backup_prefix }}/"
+    r"personalhub-[0-9]{8}T[0-9]{12}Z\.dump$"
+)
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+PUBLIC_HEALTH_URL = "https://personalhub.studexhub.com/api/health"
+HEALTH_TIMEOUT_SECONDS = 180
+HEALTH_POLL_SECONDS = 5
+
+
+class Release(NamedTuple):
+    sha: str
+    digest: str
+
+    @property
+    def reference(self) -> str:
+        return f"{IMAGE_REPOSITORY}:{self.sha}@{self.digest}"
+
+
+class DeploymentResult(NamedTuple):
+    previous: Release
+    current: Release
+    backup_object: str
+    migration: str
+    rollback: str
+
+
+class DeploymentError(Exception):
+    """Expected deployment failure with safe, non-secret status fields."""
+
+    def __init__(self, stage: str, rollback: str = "NOT_REQUIRED") -> None:
+        super().__init__(stage)
+        self.stage = stage
+        self.rollback = rollback
+
+
+class Operations(Protocol):
+    def preflight(self) -> Release: ...
+    def verify_candidate(self, sha: str) -> Release: ...
+    def pull_candidate(self, candidate: Release) -> None: ...
+    def create_backup(self) -> str: ...
+    def migrate(self, candidate: Release) -> None: ...
+    def write_release(self, release: Release) -> None: ...
+    def recreate_app(self) -> None: ...
+    def verify_post_switch(self) -> None: ...
+    def verify_rollback_health(self) -> None: ...
+
+
+def validate_sha(value: str) -> str:
+    if not SHA_PATTERN.fullmatch(value):
+        raise DeploymentError("sha-validation")
+    return value
+
+
+def parse_release_reference(value: str) -> Release:
+    match = re.fullmatch(
+        re.escape(IMAGE_REPOSITORY)
+        + r":([0-9a-f]{40})@(sha256:[0-9a-f]{64})",
+        value.strip(),
+    )
+    if not match:
+        raise DeploymentError("release-validation")
+    return Release(match.group(1), match.group(2))
+
+
+def deploy_transaction(sha: str, operations: Operations) -> DeploymentResult:
+    target_sha = validate_sha(sha)
+    previous = operations.preflight()
+    if previous.sha == target_sha:
+        raise DeploymentError("already-deployed")
+
+    candidate = operations.verify_candidate(target_sha)
+    operations.pull_candidate(candidate)
+    backup_object = operations.create_backup()
+    operations.migrate(candidate)
+
+    try:
+        operations.write_release(candidate)
+        operations.recreate_app()
+        operations.verify_post_switch()
+    except DeploymentError as deployment_failure:
+        rollback = "PASS"
+        try:
+            operations.write_release(previous)
+            operations.recreate_app()
+            operations.verify_rollback_health()
+        except DeploymentError:
+            rollback = "FAIL"
+        raise DeploymentError(deployment_failure.stage, rollback) from deployment_failure
+
+    return DeploymentResult(previous, candidate, backup_object, "PASS", "NOT_REQUIRED")
+
+
+class CommandRunner:
+    def run(
+        self,
+        argv: list[str],
+        stage: str,
+        *,
+        input_bytes: bytes | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[bytes]:
+        try:
+            result = subprocess.run(
+                argv,
+                input=input_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except OSError as error:
+            raise DeploymentError(stage) from error
+        if check and result.returncode != 0:
+            raise DeploymentError(stage)
+        return result
+
+
+class ProductionOperations:
+    def __init__(self) -> None:
+        self.runner = CommandRunner()
+        self.persistent_container_ids: dict[str, str] = {}
+        self.expected_app_release: Release | None = None
+        self.backup_object = "NOT_CREATED"
+        self.migration = "NOT_RUN"
+
+    def _container(self, service: str, stage: str) -> dict[str, object]:
+        result = self.runner.run(
+            [DOCKER, "inspect", f"personalhub-{service}-1"],
+            stage,
+        )
+        try:
+            container = json.loads(result.stdout)[0]
+        except (IndexError, TypeError, json.JSONDecodeError) as error:
+            raise DeploymentError(stage) from error
+        if not isinstance(container, dict):
+            raise DeploymentError(stage)
+        return container
+
+    @staticmethod
+    def _require_healthy(container: dict[str, object], stage: str) -> None:
+        try:
+            state = container["State"]
+            healthy = (
+                isinstance(state, dict)
+                and state["Status"] == "running"
+                and isinstance(state["Health"], dict)
+                and state["Health"]["Status"] == "healthy"
+            )
+        except (KeyError, TypeError) as error:
+            raise DeploymentError(stage) from error
+        if not healthy:
+            raise DeploymentError(stage)
+
+    @staticmethod
+    def _container_id(container: dict[str, object], stage: str) -> str:
+        identifier = container.get("Id")
+        if not isinstance(identifier, str) or not CONTAINER_ID_PATTERN.fullmatch(identifier):
+            raise DeploymentError(stage)
+        return identifier
+
+    def _verify_internal_health(self, stage: str) -> None:
+        self.runner.run(
+            [
+                DOCKER,
+                "exec",
+                "personalhub-app-1",
+                "node",
+                "-e",
+                "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ],
+            stage,
+        )
+
+    def _verify_public_health(self, stage: str) -> None:
+        self.runner.run(
+            [CURL, "--fail", "--silent", "--show-error", "--max-time", "15", "--output", "/dev/null", PUBLIC_HEALTH_URL],
+            stage,
+        )
+
+    def _verify_runtime_health(self, stage: str, *, verify_persistence: bool) -> None:
+        containers = {
+            service: self._container(service, stage)
+            for service in ("app", "postgres", "cloudflared")
+        }
+        for container in containers.values():
+            self._require_healthy(container, stage)
+
+        if verify_persistence:
+            for service in ("postgres", "cloudflared"):
+                if self._container_id(containers[service], stage) != self.persistent_container_ids[service]:
+                    raise DeploymentError("persistent-service-recreated")
+
+        if self.expected_app_release is not None:
+            try:
+                image = containers["app"]["Config"]["Image"]  # type: ignore[index]
+            except (KeyError, TypeError) as error:
+                raise DeploymentError(stage) from error
+            if image != self.expected_app_release.reference:
+                raise DeploymentError("app-image-verification")
+
+        self._verify_internal_health(stage)
+        self._verify_public_health(stage)
+
+    def preflight(self) -> Release:
+        for required in (RELEASE_ENV, RUNTIME_ENV, COMPOSE_FILE):
+            if not required.is_file() or not os.access(required, os.R_OK):
+                raise DeploymentError("runtime-files")
+
+        try:
+            release_lines = RELEASE_ENV.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            raise DeploymentError("release-read") from error
+        values = [line.partition("=")[2] for line in release_lines if line.startswith("PERSONALHUB_IMAGE=")]
+        if len(values) != 1 or len(release_lines) != 1:
+            raise DeploymentError("release-validation")
+        previous = parse_release_reference(values[0])
+        self.expected_app_release = previous
+
+        for service in ("postgres", "cloudflared"):
+            container = self._container(service, "service-preflight")
+            self._require_healthy(container, "service-preflight")
+            self.persistent_container_ids[service] = self._container_id(container, "service-preflight")
+        self._verify_runtime_health("service-preflight", verify_persistence=True)
+        return previous
+
+    def verify_candidate(self, sha: str) -> Release:
+        result = self.runner.run(
+            [
+                AWS,
+                "ecr",
+                "batch-get-image",
+                "--region",
+                REGION,
+                "--repository-name",
+                ECR_REPOSITORY,
+                "--image-ids",
+                f"imageTag={sha}",
+                "--accepted-media-types",
+                "application/vnd.oci.image.index.v1+json",
+                "--output",
+                "json",
+            ],
+            "candidate-inspection",
+        )
+        try:
+            response = json.loads(result.stdout)
+            if response.get("failures") or len(response["images"]) != 1:
+                raise DeploymentError("candidate-inspection")
+            image = response["images"][0]
+            digest = image["imageId"]["imageDigest"]
+            manifest = json.loads(image["imageManifest"])
+            arm64 = [
+                descriptor
+                for descriptor in manifest["manifests"]
+                if descriptor.get("platform", {}).get("os") == "linux"
+                and descriptor.get("platform", {}).get("architecture") == "arm64"
+            ]
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise DeploymentError("candidate-inspection") from error
+        if not isinstance(digest, str) or not DIGEST_PATTERN.fullmatch(digest) or len(arm64) != 1:
+            raise DeploymentError("candidate-inspection")
+        arm_digest = arm64[0].get("digest")
+        if not isinstance(arm_digest, str) or not DIGEST_PATTERN.fullmatch(arm_digest):
+            raise DeploymentError("candidate-inspection")
+        return Release(sha, digest)
+
+    def pull_candidate(self, candidate: Release) -> None:
+        self.runner.run([ECR_LOGIN], "ecr-login")
+        self.runner.run([DOCKER, "pull", candidate.reference], "candidate-pull")
+        inspected = self.runner.run(
+            [DOCKER, "image", "inspect", candidate.reference],
+            "candidate-labels",
+        )
+        try:
+            image = json.loads(inspected.stdout)[0]
+            labels = image["Config"]["Labels"]
+            repo_digests = image["RepoDigests"]
+        except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise DeploymentError("candidate-labels") from error
+        if labels.get("org.opencontainers.image.revision") != candidate.sha:
+            raise DeploymentError("candidate-labels")
+        if labels.get("org.opencontainers.image.source") != EXPECTED_SOURCE:
+            raise DeploymentError("candidate-labels")
+        if f"{IMAGE_REPOSITORY}@{candidate.digest}" not in repo_digests:
+            raise DeploymentError("candidate-digest")
+
+    def create_backup(self) -> str:
+        active = self.runner.run(
+            [SYSTEMCTL, "is-active", "--quiet", BACKUP_SERVICE],
+            "backup-preflight",
+            check=False,
+        )
+        if active.returncode == 0:
+            raise DeploymentError("backup-concurrent")
+        self.runner.run([SYSTEMCTL, "start", BACKUP_SERVICE], "backup")
+        invocation = self.runner.run(
+            [SYSTEMCTL, "show", BACKUP_SERVICE, "--property=InvocationID", "--value"],
+            "backup-verification",
+        ).stdout.decode("utf-8", errors="strict").strip()
+        if not re.fullmatch(r"[0-9a-f]{32}", invocation):
+            raise DeploymentError("backup-verification")
+        journal = self.runner.run(
+            [JOURNALCTL, "--unit", BACKUP_SERVICE, f"_SYSTEMD_INVOCATION_ID={invocation}", "--output=cat", "--no-pager"],
+            "backup-verification",
+        ).stdout.decode("utf-8", errors="strict")
+        objects = [line.partition("=")[2] for line in journal.splitlines() if line.startswith("backup-object=")]
+        if "backup-result=PASS" not in journal.splitlines() or len(objects) != 1:
+            raise DeploymentError("backup-verification")
+        if not BACKUP_URI_PATTERN.fullmatch(objects[0]):
+            raise DeploymentError("backup-verification")
+        self.backup_object = objects[0]
+        return objects[0]
+
+    def migrate(self, candidate: Release) -> None:
+        self.runner.run(
+            [
+                DOCKER,
+                "run",
+                "--rm",
+                "--network",
+                "personalhub-production-backend",
+                "--env-file",
+                str(RUNTIME_ENV),
+                candidate.reference,
+                "npx",
+                "prisma",
+                "migrate",
+                "deploy",
+            ],
+            "migration",
+        )
+        self.migration = "PASS"
+
+    def write_release(self, release: Release) -> None:
+        data = f"PERSONALHUB_IMAGE={release.reference}\n".encode("utf-8")
+        try:
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".release.env.", dir=RELEASE_ENV.parent)
+            temporary = Path(temporary_name)
+            try:
+                os.fchmod(descriptor, 0o600)
+                with os.fdopen(descriptor, "wb", closefd=True) as output:
+                    output.write(data)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, RELEASE_ENV)
+                directory_fd = os.open(RELEASE_ENV.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            raise DeploymentError("release-write") from error
+        self.expected_app_release = release
+
+    def recreate_app(self) -> None:
+        self.runner.run(
+            [COMPOSE, "up", "--detach", "--no-deps", "--force-recreate", "app"],
+            "app-recreate",
+        )
+
+    def _wait_for_health(self, stage: str) -> None:
+        deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                self._verify_runtime_health(stage, verify_persistence=True)
+                return
+            except DeploymentError:
+                time.sleep(HEALTH_POLL_SECONDS)
+        raise DeploymentError(stage)
+
+    def verify_post_switch(self) -> None:
+        self._wait_for_health("post-switch-health")
+
+    def verify_rollback_health(self) -> None:
+        self._wait_for_health("rollback-health")
+
+
+def main() -> int:
+    started = time.monotonic()
+    if os.geteuid() != 0:
+        print("deployment-result=FAIL stage=root-required application-rollback=NOT_REQUIRED", file=sys.stderr)
+        return 1
+    if len(sys.argv) != 2:
+        print("deployment-result=FAIL stage=argument-validation application-rollback=NOT_REQUIRED", file=sys.stderr)
+        return 1
+
+    try:
+        target_sha = validate_sha(sys.argv[1])
+    except DeploymentError as error:
+        print(f"deployment-result=FAIL stage={error.stage} application-rollback={error.rollback}", file=sys.stderr)
+        return 1
+
+    operations = ProductionOperations()
+    LOCK_FILE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    with LOCK_FILE.open("a+b") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("deployment-result=FAIL stage=concurrent-deployment application-rollback=NOT_REQUIRED", file=sys.stderr)
+            return 1
+
+        try:
+            result = deploy_transaction(target_sha, operations)
+        except DeploymentError as error:
+            print(f"target-sha={target_sha}", file=sys.stderr)
+            print(f"backup-object={operations.backup_object}", file=sys.stderr)
+            print(f"migration-result={operations.migration}", file=sys.stderr)
+            print(f"app-health=FAIL stage={error.stage}", file=sys.stderr)
+            print(f"application-rollback={error.rollback}", file=sys.stderr)
+            print(f"deployment-result=FAIL stage={error.stage}", file=sys.stderr)
+            return 1
+        except Exception:
+            print(f"target-sha={target_sha}", file=sys.stderr)
+            print("application-rollback=UNKNOWN", file=sys.stderr)
+            print("deployment-result=FAIL stage=unexpected", file=sys.stderr)
+            return 1
+
+    duration = time.monotonic() - started
+    print(f"target-sha={target_sha}")
+    print(f"previous-sha={result.previous.sha}")
+    print(f"candidate-digest={result.current.digest}")
+    print(f"backup-object={result.backup_object}")
+    print(f"migration-result={result.migration}")
+    print("app-health=PASS")
+    print(f"application-rollback={result.rollback}")
+    print(f"final-deployed-sha={result.current.sha}")
+    print(f"deployment-duration-seconds={duration:.3f}")
+    print("deployment-result=PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

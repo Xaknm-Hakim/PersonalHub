@@ -1,6 +1,6 @@
 # PersonalHub production runtime
 
-Phase 2B runs PostgreSQL and PersonalHub privately and uses a remotely managed Cloudflare Tunnel as the only Internet-facing connector. The production owner is initialized, real product data is present, and Phase 2B.5 provides daily off-host PostgreSQL backups. CI/CD remains deferred. No service publishes a host port, and the AWS security group retains zero ingress rules.
+Phase 2B runs PostgreSQL and PersonalHub privately and uses a remotely managed Cloudflare Tunnel as the only Internet-facing connector. The production owner is initialized, real product data is present, and Phase 2B.5 provides daily off-host PostgreSQL backups. Phase 2C.2 provides a manual, SSM-mediated deployment path; automatic deployment remains disabled. No service publishes a host port, and the AWS security group retains zero ingress rules.
 
 ## Private Compose architecture
 
@@ -43,6 +43,16 @@ On an empty first production database:
 11. start cloudflared only after validation succeeds.
 
 The application image entrypoint also runs `prisma migrate deploy` before `npm start`. This repeat is deliberately idempotent and prevents a normal restart from serving against an older schema. Never run `migrate dev`, seeds, or owner bootstrap as part of deployment. Production now contains the manually bootstrapped owner and the selectively migrated PersonalHub product dataset recorded in `docs/PRODUCTION-DATA-MIGRATION-2026-09-26.md`.
+
+## Transactional manual deployment
+
+Ansible installs `/usr/local/sbin/personalhub-deploy` as a root-owned mode-0750 helper but never invokes it or selects a release during convergence. The helper accepts exactly one lowercase 40-character Git SHA and fixes the registry/repository internally. It rejects partial SHAs, `latest`, arbitrary image references, extra arguments, and concurrent deployments.
+
+For each authorized deployment it verifies the existing runtime, resolves and pulls the candidate by its immutable ECR digest, runs and verifies `personalhub-postgres-backup.service`, executes only `prisma migrate deploy`, atomically changes `/etc/personalhub/release.env`, and force-recreates only `app`. PostgreSQL, cloudflared, their networks, and `personalhub-production-postgres-data` are not recreated. Internal and public health checks use a bounded timeout.
+
+After a failed post-switch health gate, the helper restores the previous release file atomically, recreates only the previous app image, and reports application rollback health. It never automatically restores PostgreSQL. Database rollback is a separate destructive recovery operation requiring explicit review; the newly created S3 dump is its recovery anchor. A schema migration can make application-image rollback incompatible, in which case rollback health is reported as failed and production requires operator intervention.
+
+GitHub reaches this helper only through the Terraform-managed `personalhub-production-deploy` SSM document. The document validates `DeploySha` and has a fixed command; the GitHub deploy role cannot open a session or submit arbitrary shell commands.
 
 ## Private verification
 
