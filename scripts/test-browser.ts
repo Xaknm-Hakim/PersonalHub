@@ -7,6 +7,7 @@ import {
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
+import { resolve } from "node:path";
 
 const root = process.cwd();
 const suffix = `${process.pid}_${randomBytes(8).toString("hex")}`;
@@ -17,6 +18,7 @@ const password = randomBytes(24).toString("hex");
 const ownerPassword = randomBytes(24).toString("base64url");
 let started = false;
 let app: ChildProcess | undefined;
+let appSpawnError: Error | undefined;
 
 function run(command: string, args: string[], env = process.env) {
   return execFileSync(command, args, {
@@ -47,10 +49,64 @@ async function runBrowser(env: NodeJS.ProcessEnv) {
   });
 }
 
-function cleanup() {
-  if (app) {
-    app.kill("SIGTERM");
-    app = undefined;
+function processGroupExists(processGroupId: number) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+function signalProcessGroup(processGroupId: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs: number
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(processGroupId)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  return true;
+}
+
+async function stopApp() {
+  const child = app;
+  app = undefined;
+  if (!child) return;
+
+  const processGroupId = child.pid;
+  const useProcessGroup = process.platform !== "win32" && processGroupId;
+  if (useProcessGroup) {
+    signalProcessGroup(processGroupId, "SIGTERM");
+    if (!(await waitForProcessGroupExit(processGroupId, 5000))) {
+      signalProcessGroup(processGroupId, "SIGKILL");
+      if (!(await waitForProcessGroupExit(processGroupId, 5000)))
+        throw new Error("Production test server process group did not exit.");
+    }
+  } else if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+  }
+
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
+
+async function cleanup() {
+  let appCleanupError: unknown;
+  try {
+    await stopApp();
+  } catch (error) {
+    appCleanupError = error;
   }
   if (!started) return;
   const containerLabel = spawnSync(
@@ -88,6 +144,7 @@ function cleanup() {
     spawnSync("docker", ["volume", "rm", volume], { stdio: "ignore" });
     started = false;
   }
+  if (appCleanupError) throw appCleanupError;
 }
 
 function waitForPostgres() {
@@ -128,6 +185,7 @@ async function freePort() {
 
 async function waitForApp(url: string) {
   for (let attempt = 0; attempt < 120; attempt++) {
+    if (appSpawnError) throw appSpawnError;
     if (app?.exitCode !== null)
       throw new Error(
         `Production app exited before readiness (code ${app?.exitCode}).`
@@ -196,15 +254,26 @@ async function main() {
     const port = await freePort();
     const appUrl = `http://127.0.0.1:${port}`;
     const child = spawn(
-      "npm",
-      ["start", "--", "-p", String(port), "-H", "127.0.0.1"],
+      process.execPath,
+      [
+        resolve(root, "node_modules/next/dist/bin/next"),
+        "start",
+        "-p",
+        String(port),
+        "-H",
+        "127.0.0.1"
+      ],
       {
         cwd: root,
         env,
+        detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"]
       }
     );
     app = child;
+    child.once("error", (error) => {
+      appSpawnError = error;
+    });
     let stderr = "";
     let stdout = "";
     child.stdout?.on("data", (chunk) => {
@@ -225,10 +294,12 @@ async function main() {
       if (stderr.trim()) process.stderr.write(stderr);
       throw error;
     }
-    console.log("Disposable production browser smoke tests passed.");
   } finally {
-    cleanup();
+    await cleanup();
   }
+  console.log(
+    "Disposable production browser smoke tests passed and cleaned up."
+  );
 }
 
 main().catch((error) => {
