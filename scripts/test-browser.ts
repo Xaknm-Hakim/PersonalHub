@@ -9,6 +9,8 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 
+import { waitForDisposablePostgres } from "./disposable-postgres";
+
 const root = process.cwd();
 const suffix = `${process.pid}_${randomBytes(8).toString("hex")}`;
 const database = `personalhub_test_browser_${suffix}`;
@@ -147,29 +149,6 @@ async function cleanup() {
   if (appCleanupError) throw appCleanupError;
 }
 
-function waitForPostgres() {
-  for (let attempt = 0; attempt < 60; attempt++) {
-    if (
-      spawnSync(
-        "docker",
-        [
-          "exec",
-          container,
-          "pg_isready",
-          "-U",
-          "personalhub_test",
-          "-d",
-          database
-        ],
-        { stdio: "ignore" }
-      ).status === 0
-    )
-      return;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
-  }
-  throw new Error("Disposable browser PostgreSQL did not become ready.");
-}
-
 async function freePort() {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
@@ -231,7 +210,7 @@ async function main() {
       "postgres:16-alpine"
     ]);
     started = true;
-    waitForPostgres();
+    waitForDisposablePostgres(container, "personalhub_test", database);
     const mapping = run("docker", ["port", container, "5432/tcp"]);
     const postgresPort = /^127\.0\.0\.1:(\d+)$/.exec(mapping)?.[1];
     if (!postgresPort)

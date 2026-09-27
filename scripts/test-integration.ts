@@ -5,6 +5,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
+import { waitForDisposablePostgres } from "./disposable-postgres";
+
 const root = process.cwd();
 const suffix = `${process.pid}_${randomBytes(8).toString("hex")}`;
 const database = `personalhub_test_${suffix}`;
@@ -62,27 +64,6 @@ function cleanup() {
     started = false;
   }
 }
-function waitForPostgres() {
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const ready = spawnSync(
-      "docker",
-      [
-        "exec",
-        container,
-        "pg_isready",
-        "-U",
-        "personalhub_test",
-        "-d",
-        database
-      ],
-      { stdio: "ignore" }
-    );
-    if (ready.status === 0) return;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
-  }
-  throw new Error("Disposable PostgreSQL did not become ready.");
-}
-
 try {
   // These tests make no connections, so they are safe and prove the guard before Docker work.
   run("npx", ["vitest", "run", "tests/test-database-safety.test.ts"]);
@@ -114,7 +95,7 @@ try {
     "postgres:16-alpine"
   ]);
   started = true;
-  waitForPostgres();
+  waitForDisposablePostgres(container, "personalhub_test", database);
   const mapping = run("docker", ["port", container, "5432/tcp"]);
   const port = /^127\.0\.0\.1:(\d+)$/.exec(mapping)?.[1];
   if (!port)
