@@ -263,15 +263,25 @@ jobs:
                   ).strip()
                   with urllib.request.urlopen(url) as response:
                       statement = json.load(response)
-                  if statement.get('_type') != 'https://in-toto.io/Statement/v0.1':
+                  if statement.get('_type') not in {
+                      'https://in-toto.io/Statement/v0.1',
+                      'https://in-toto.io/Statement/v1',
+                  }:
                       raise SystemExit('Unexpected attestation statement type.')
+                  if statement.get('predicateType') != predicate_type:
+                      raise SystemExit('Attestation predicate type mismatch.')
                   if not any(
                       subject.get('digest', {}).get('sha256') == expected_subject
                       for subject in statement.get('subject', [])
                   ):
                       raise SystemExit('Attestation subject does not match the ARM64 manifest.')
                   if predicate_type.startswith('https://slsa.dev/provenance/'):
-                      if not statement.get('predicate', {}).get('builder', {}).get('id'):
+                      predicate = statement.get('predicate', {})
+                      builder_id = (
+                          predicate.get('builder', {}).get('id')
+                          or predicate.get('runDetails', {}).get('builder', {}).get('id')
+                      )
+                      if not builder_id:
                           raise SystemExit('Provenance does not identify its builder.')
                       found_provenance = True
                   elif predicate_type == 'https://spdx.dev/Document':
