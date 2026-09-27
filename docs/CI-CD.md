@@ -48,7 +48,9 @@ The dedicated role is:
 
 Its trust policy requires both the expected audience and this exact subject:
 
-`repo:Xaknm-Hakim/PersonalHub:ref:refs/heads/main`
+`repo:Xaknm-Hakim@210323710/PersonalHub@1375982542:ref:refs/heads/main`
+
+GitHub currently emits this identity-qualified default subject for the repository. `210323710` is the immutable GitHub owner ID for `Xaknm-Hakim`, and `1375982542` is the immutable repository ID for `PersonalHub`; both are non-secret identity metadata verified through the GitHub API. The role accepts only that owner/repository identity on `refs/heads/main` and does not retain the older name-only subject as a fallback.
 
 Therefore another repository, fork, organization repository, branch, tag, or pull-request context cannot assume the role. GitHub exchanges its short-lived OIDC identity for temporary AWS role credentials. No IAM user, access key, GitHub AWS access-key secret, or long-lived AWS credential is created.
 

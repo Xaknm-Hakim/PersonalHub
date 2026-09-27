@@ -1,6 +1,7 @@
 locals {
-  github_repository = "Xaknm-Hakim/PersonalHub"
-  github_main_ref   = "repo:${local.github_repository}:ref:refs/heads/main"
+  github_owner_identity      = "Xaknm-Hakim@210323710"
+  github_repository_identity = "PersonalHub@1375982542"
+  github_main_ref            = "repo:${local.github_owner_identity}/${local.github_repository_identity}:ref:refs/heads/main"
 }
 
 resource "aws_iam_openid_connect_provider" "github_actions" {
