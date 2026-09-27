@@ -150,7 +150,8 @@ try {
   assert.ok(hideBox.x + hideBox.width + 4 <= themeBox.x);
   assert.ok(themeBox.x + themeBox.width + 4 <= signOutBox.x);
   assert.ok(
-    signOutBox.x + signOutBox.width <= sidebarBox.x + sidebarBox.width - 8
+    signOutBox.x + signOutBox.width <= sidebarBox.x + sidebarBox.width,
+    "Sign-out control must remain inside the expanded sidebar."
   );
   assert.ok([hideBox, themeBox, signOutBox].every((box) => box.width >= 36));
 
@@ -177,7 +178,8 @@ try {
     );
     assert.ok(
       resizedSignOutBox.x + resizedSignOutBox.width <=
-        resizedSidebarBox.x + resizedSidebarBox.width - 8
+        resizedSidebarBox.x + resizedSidebarBox.width,
+      `Sign-out control must remain inside the ${width}px sidebar layout.`
     );
   }
   await page.setViewportSize({ width: 1280, height: 720 });
