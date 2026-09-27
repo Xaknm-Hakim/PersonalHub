@@ -38,6 +38,16 @@ output "github_build_role_arn" {
   value       = aws_iam_role.github_build.arn
 }
 
+output "github_deploy_role_arn" {
+  description = "ARN assumed by the main-branch GitHub Actions manual production deployment workflow."
+  value       = aws_iam_role.github_deploy.arn
+}
+
+output "production_deploy_ssm_document_name" {
+  description = "Name of the constrained SSM document that invokes the host-owned deployment helper."
+  value       = aws_ssm_document.personalhub_deploy.name
+}
+
 output "postgres_backup_bucket_name" {
   description = "Name of the private bucket reserved for PostgreSQL backups."
   value       = aws_s3_bucket.postgres_backups.id
