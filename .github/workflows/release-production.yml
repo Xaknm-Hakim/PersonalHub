@@ -1,0 +1,120 @@
+---
+name: Automatic production release
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: personalhub-production-release
+  cancel-in-progress: false
+
+jobs:
+  require-green-main-ci:
+    name: Require successful main CI
+    if: github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.gate.outputs.source_sha }}
+
+    steps:
+      - name: Bind this release to the successful CI revision
+        id: gate
+        shell: bash
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_EVENT: ${{ github.event.workflow_run.event }}
+          CI_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          test "$CI_EVENT" = push
+          test "$CI_HEAD_BRANCH" = main
+          test "$CI_CONCLUSION" = success
+          [[ "$CI_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          printf 'source_sha=%s\n' "$CI_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          {
+            printf '### Automatic production release\n\n'
+            printf -- '- Source SHA: `%s`\n' "$CI_HEAD_SHA"
+            printf -- '- CI run: `%s`\n' "$CI_RUN_ID"
+            printf -- '- CI result: PASS\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish and verify exact CI revision
+    needs: require-green-main-ci
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      image_sha: ${{ needs.require-green-main-ci.outputs.source_sha }}
+
+  deploy:
+    name: Deploy current verified revision
+    needs:
+      - require-green-main-ci
+      - publish
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-production.yml
+    with:
+      image_sha: ${{ needs.require-green-main-ci.outputs.source_sha }}
+      require_current_main: true
+
+  summarize:
+    name: Summarize automatic release
+    if: always() && github.event.workflow_run.event == 'push'
+    needs:
+      - require-green-main-ci
+      - publish
+      - deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Record release-chain results
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.require-green-main-ci.outputs.source_sha }}
+          CI_RESULT: ${{ needs.require-green-main-ci.result }}
+          PUBLICATION_RESULT: ${{ needs.publish.result }}
+          INDEX_DIGEST: ${{ needs.publish.outputs.index_digest }}
+          ARM64_DIGEST: ${{ needs.publish.outputs.arm64_digest }}
+          SCAN_CRITICAL: ${{ needs.publish.outputs.scan_critical }}
+          SCAN_HIGH: ${{ needs.publish.outputs.scan_high }}
+          SCAN_MEDIUM: ${{ needs.publish.outputs.scan_medium }}
+          SCAN_LOW: ${{ needs.publish.outputs.scan_low }}
+          DEPLOY_JOB_RESULT: ${{ needs.deploy.result }}
+          RELEASE_STATUS: ${{ needs.deploy.outputs.release_status }}
+        run: |
+          set -euo pipefail
+          {
+            printf '### Automatic release chain\n\n'
+            printf -- '- Source SHA: `%s`\n' "${SOURCE_SHA:-unavailable}"
+            printf -- '- CI gate: `%s`\n' "$CI_RESULT"
+            printf -- '- Publication: `%s`\n' "$PUBLICATION_RESULT"
+            if [ -n "$INDEX_DIGEST" ]; then
+              printf -- '- OCI index: `%s`\n' "$INDEX_DIGEST"
+              printf -- '- ARM64 manifest: `%s`\n' "$ARM64_DIGEST"
+              printf -- '- Scan: Critical %s, High %s, Medium %s, Low %s\n' \
+                "$SCAN_CRITICAL" "$SCAN_HIGH" "$SCAN_MEDIUM" "$SCAN_LOW"
+            fi
+            printf -- '- Deployment job: `%s`\n' "$DEPLOY_JOB_RESULT"
+            printf -- '- Release result: `%s`\n' "${RELEASE_STATUS:-NOT_RUN}"
+          } >> "$GITHUB_STEP_SUMMARY"

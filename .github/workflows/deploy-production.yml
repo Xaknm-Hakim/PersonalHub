@@ -9,6 +9,27 @@ on:
         description: Full lowercase Git SHA of the published production candidate
         required: true
         type: string
+  workflow_call:
+    inputs:
+      image_sha:
+        description: Exact full lowercase Git SHA from verified publication
+        required: true
+        type: string
+      require_current_main:
+        description: Refuse deployment when this SHA is no longer the current main head
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      release_status:
+        description: DEPLOYED or SUPERSEDED
+        value: ${{ jobs.deploy.outputs.release_status }}
+      index_digest:
+        description: Verified candidate OCI index digest
+        value: ${{ jobs.deploy.outputs.index_digest }}
+      arm64_digest:
+        description: Verified candidate linux/arm64 manifest digest
+        value: ${{ jobs.deploy.outputs.arm64_digest }}
 
 permissions:
   contents: read
@@ -26,20 +47,24 @@ env:
   SSM_DOCUMENT: personalhub-production-deploy
   INSTANCE_ID: i-0c60a9a2bca804257
   DEPLOY_SHA: ${{ inputs.image_sha }}
+  REQUIRE_CURRENT_MAIN: ${{ inputs.require_current_main || false }}
 
 jobs:
   deploy:
     name: Validate and deploy production release
     runs-on: ubuntu-24.04
     timeout-minutes: 50
+    outputs:
+      release_status: ${{ steps.outcome.outputs.release_status }}
+      index_digest: ${{ steps.candidate.outputs.index_digest }}
+      arm64_digest: ${{ steps.candidate.outputs.arm64_digest }}
 
     steps:
       # Actions are pinned to immutable upstream commit SHAs; Dependabot can review updates.
-      - name: Require the intended manual main-branch context
+      - name: Require an intended main-branch release context
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
           test "$GITHUB_REF" = "refs/heads/main"
           [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
 
@@ -192,10 +217,32 @@ jobs:
       - name: Invoke the constrained production deployment document
         id: command
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
           parameters=$(jq -cn --arg sha "$DEPLOY_SHA" '{DeploySha:[$sha]}')
+
+          if [ "$REQUIRE_CURRENT_MAIN" = true ]; then
+            current_main=$(gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+              --jq '.object.sha')
+            [[ "$current_main" =~ ^[0-9a-f]{40}$ ]]
+            printf 'current-main-sha=%s\n' "$current_main"
+            if [ "$current_main" != "$DEPLOY_SHA" ]; then
+              printf 'superseded=true\n' >> "$GITHUB_OUTPUT"
+              printf 'release-status=SUPERSEDED\n'
+              {
+                printf '### Production release\n\n'
+                printf -- '- Source SHA: `%s`\n' "$DEPLOY_SHA"
+                printf -- '- Current main SHA: `%s`\n' "$current_main"
+                printf -- '- Result: **SUPERSEDED** (production unchanged)\n'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
           command_id=$(aws ssm send-command \
             --region "$AWS_REGION" \
             --instance-ids "$INSTANCE_ID" \
@@ -205,10 +252,13 @@ jobs:
             --timeout-seconds 3600 \
             --query 'Command.CommandId' \
             --output text)
+          printf 'superseded=false\n' >> "$GITHUB_OUTPUT"
           printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
           printf 'ssm-command-submitted=PASS\n'
 
       - name: Wait for bounded deployment completion
+        id: deployment
+        if: steps.command.outputs.superseded != 'true'
         shell: bash
         env:
           COMMAND_ID: ${{ steps.command.outputs.command_id }}
@@ -277,3 +327,30 @@ jobs:
           safe_success_fields+='deployment-duration-seconds|deployment-result)='
           grep -E "$safe_success_fields" /tmp/personalhub-deploy.stdout
           printf 'deployment-status=Success\n'
+
+      - name: Record release outcome
+        id: outcome
+        if: success()
+        shell: bash
+        env:
+          INDEX_DIGEST: ${{ steps.candidate.outputs.index_digest }}
+          ARM64_DIGEST: ${{ steps.candidate.outputs.arm64_digest }}
+          SUPERSEDED: ${{ steps.command.outputs.superseded }}
+        run: |
+          set -euo pipefail
+          if [ "$SUPERSEDED" = true ]; then
+            printf 'release_status=SUPERSEDED\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf 'release_status=DEPLOYED\n' >> "$GITHUB_OUTPUT"
+          {
+            printf '### Production deployment\n\n'
+            printf -- '- Source SHA: `%s`\n' "$DEPLOY_SHA"
+            printf -- '- OCI index: `%s`\n' "$INDEX_DIGEST"
+            printf -- '- ARM64 manifest: `%s`\n' "$ARM64_DIGEST"
+            while IFS= read -r line; do
+              printf -- '- %s\n' "$line"
+            done < <(grep -E '^(backup-object|migration-result|app-health|application-rollback|final-deployed-sha|deployment-result)=' \
+              /tmp/personalhub-deploy.stdout)
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,10 +1,10 @@
-# Continuous integration, immutable publication, and manual deployment
+# Continuous integration and verified production release
 
 ## Phase boundary
 
 Phase 2C.1 added application CI and a controlled, build-only GitHub Actions publication path. The build role still cannot deploy images, invoke Systems Manager, read production secrets, run production migrations, or restart production.
 
-Phase 2C.2 adds a separate manual `workflow_dispatch` deployment through a constrained SSM document and a host-owned transactional helper. A push to `main` never deploys production. Automatic green-main promotion remains disabled and is deferred to Phase 2C.3.
+Phase 2C.2 added a separate manual `workflow_dispatch` deployment through a constrained SSM document and a host-owned transactional helper. Phase 2C.3 composes those proven publication and deployment workflows into an automatic release chain after successful CI on a `main` push. Manual publication and deployment remain available as operational recovery paths.
 
 ## Repository and action integrity
 
@@ -54,7 +54,7 @@ GitHub currently emits this identity-qualified default subject for the repositor
 
 Therefore another repository, fork, organization repository, branch, tag, or pull-request context cannot assume the role. GitHub exchanges its short-lived OIDC identity for temporary AWS role credentials. No IAM user, access key, GitHub AWS access-key secret, or long-lived AWS credential is created.
 
-The workflow verifies that a dispatch targets `refs/heads/main`; that check does not configure GitHub branch protection. Protect `main` in the repository settings before treating it as a release-authority boundary.
+The publication and deployment workflows verify that they run on `refs/heads/main`; that check does not configure GitHub branch protection. Protect `main` in the repository settings before treating it as a release-authority boundary.
 
 ## Build and deploy role separation
 
@@ -84,7 +84,7 @@ GitHub tells the host only which reviewed SHA to deploy. The host role performs 
 
 ## Controlled image publication
 
-`.github/workflows/publish-image.yml` is `workflow_dispatch` only in Phase 2C.1. Dispatch it from `main` only. The IAM subject restriction independently enforces the same branch boundary.
+`.github/workflows/publish-image.yml` supports both `workflow_call` and `workflow_dispatch`. The automatic release passes the exact SHA reported by the successful CI run. A manual dispatch may provide a full lowercase main-branch SHA and otherwise publishes its own workflow revision. The workflow checks out that exact commit and proves it belongs to `main`; the IAM subject restriction independently enforces the workflow's `main` execution context.
 
 The workflow repeats the application validation gates before publication, then:
 
@@ -103,11 +103,13 @@ The workflow never publishes or treats `latest` as a deployment identity. ECR ta
 
 ECR can scan only after an image has been uploaded. A failed scan therefore leaves an immutable but rejected candidate in the repository. The separate Phase 2C.2 deployment workflow independently requires a completed scan with zero Critical findings before selecting any digest.
 
-A successful publication only creates a candidate artifact. Production continues using the image explicitly selected in `/etc/personalhub/release.env` until a separate manual deployment is authorized.
+A successful standalone manual publication only creates a candidate artifact. In the automatic release chain, successful verified publication passes the same immutable SHA to the deployment workflow.
 
-## Manual production deployment
+## Production deployment
 
-`.github/workflows/deploy-production.yml` has only a `workflow_dispatch` trigger and requires an exact lowercase 40-character Git SHA. Before sending an SSM command it proves that the commit exists and is reachable from `main`, the immutable ECR tag exists, exactly one `linux/arm64` image manifest exists, source and revision labels match, scanning is complete, and Critical findings are zero.
+`.github/workflows/deploy-production.yml` supports both `workflow_call` and `workflow_dispatch` and requires an exact lowercase 40-character Git SHA. Before sending an SSM command it proves that the commit exists and is reachable from `main`, the immutable ECR tag exists, exactly one `linux/arm64` image manifest exists, source and revision labels match, scanning is complete, and Critical findings are zero.
+
+Automatic calls additionally read the current GitHub `main` ref immediately before `ssm:SendCommand`. If it differs from the release SHA, the workflow reports `SUPERSEDED`, does not invoke production, and succeeds because production did not fail. Manual calls intentionally omit this current-head condition so an operator can redeploy or roll back to a reviewed immutable main-history artifact.
 
 The workflow assumes only the deploy role and invokes the fixed custom SSM document. It cannot send arbitrary shell content. It polls the command with a bounded timeout and exposes only safe release, digest, backup, migration, health, and rollback status fields.
 
@@ -124,17 +126,39 @@ The host helper serializes deployments with a non-blocking lock and then:
 
 If post-switch application health fails, the helper atomically restores the prior immutable release, recreates only the app, and reports whether application rollback recovered health. It never automatically restores PostgreSQL. A migration may not be backward compatible with the previous application; if rollback health fails, the database remains untouched, the pre-deployment S3 backup remains the recovery anchor, and an operator must perform a separately reviewed recovery.
 
+## Automatic green-main release
+
+`.github/workflows/release-production.yml` listens only for completion of the workflow named `CI` on `main`. It accepts only a successful push run, captures that run's exact `head_sha`, and passes the same value explicitly to both reusable workflows:
+
+```text
+main push SHA
+  -> CI for that SHA
+  -> publish-image(image_sha = CI head SHA)
+  -> provenance, SBOM, platform, label, and scan verification
+  -> deploy-production(image_sha = CI head SHA, require_current_main = true)
+  -> current-main comparison
+  -> constrained SSM deployment
+  -> host backup, migration, app switch, and health checks
+```
+
+The release workflow never derives a later SHA from its checkout or from the mutable branch name. Publication checks out the explicit SHA, image tags and labels use it, deployment verifies it, and the SSM document receives only that SHA. This prevents mixing a CI result, artifact, and deployment from different revisions.
+
+Automatic runs share the `personalhub-production-release` concurrency group with `cancel-in-progress: false`. An in-progress release is never canceled because a newer commit arrives. An older run that reaches the pre-command current-head check after `main` advances reports `SUPERSEDED` and leaves production unchanged. GitHub may replace an older pending run in a concurrency group with a newer pending run; such a run has not published or deployed and its SHA has already been superseded.
+
+No GitHub Environment approval is configured. The release needs no repository write permission and uses only `contents: read` and `id-token: write`. The called workflows assume the existing build and deploy roles respectively; no AWS permissions are combined or expanded.
+
 ## Operator commands
 
 Observe CI and publication runs with authenticated GitHub tooling:
 
 ```text
 gh run list --workflow ci.yml
-gh workflow run publish-image.yml --ref main
+gh run list --workflow release-production.yml
+gh workflow run publish-image.yml --ref main -f image_sha=<full-git-sha>
 gh run list --workflow publish-image.yml
 gh run watch <run-id> --exit-status
 gh workflow run deploy-production.yml --ref main -f image_sha=<full-git-sha>
 gh run list --workflow deploy-production.yml
 ```
 
-Publishing and deployment remain separate manual operations. Do not dispatch deployment merely because CI or publication succeeded.
+A normal `main` push requires no manual dispatch: successful exact-SHA CI automatically proceeds through verified publication and deployment. The two manual workflows remain separate operational tools for explicitly selected immutable SHAs; dispatch them only for a reviewed recovery or redeployment.

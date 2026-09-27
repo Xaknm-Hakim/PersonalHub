@@ -1,14 +1,46 @@
+---
 name: Publish immutable ARM64 image
 
+# yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Optional full lowercase Git SHA from main; defaults to the workflow revision
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      image_sha:
+        description: Exact full lowercase Git SHA from the successful CI run
+        required: true
+        type: string
+    outputs:
+      index_digest:
+        description: Published OCI index digest
+        value: ${{ jobs.validate-build-publish.outputs.index_digest }}
+      arm64_digest:
+        description: Published linux/arm64 manifest digest
+        value: ${{ jobs.validate-build-publish.outputs.arm64_digest }}
+      scan_critical:
+        description: ECR Critical finding count
+        value: ${{ jobs.validate-build-publish.outputs.scan_critical }}
+      scan_high:
+        description: ECR High finding count
+        value: ${{ jobs.validate-build-publish.outputs.scan_high }}
+      scan_medium:
+        description: ECR Medium finding count
+        value: ${{ jobs.validate-build-publish.outputs.scan_medium }}
+      scan_low:
+        description: ECR Low finding count
+        value: ${{ jobs.validate-build-publish.outputs.scan_low }}
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: publish-image-${{ github.sha }}
+  group: publish-image-${{ inputs.image_sha || github.sha }}
   cancel-in-progress: false
 
 env:
@@ -16,12 +48,20 @@ env:
   AWS_ROLE_ARN: arn:aws:iam::210855481769:role/personalhub-production-github-build
   ECR_REGISTRY: 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
   ECR_REPOSITORY: personalhub-production
+  SOURCE_SHA: ${{ inputs.image_sha || github.sha }}
 
 jobs:
   validate-build-publish:
     name: Validate, build, and publish
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    outputs:
+      index_digest: ${{ steps.build.outputs.digest }}
+      arm64_digest: ${{ steps.artifact.outputs.arm64_digest }}
+      scan_critical: ${{ steps.scan.outputs.critical }}
+      scan_high: ${{ steps.scan.outputs.high }}
+      scan_medium: ${{ steps.scan.outputs.medium }}
+      scan_low: ${{ steps.scan.outputs.low }}
 
     steps:
       # Actions are pinned to immutable upstream commit SHAs; Dependabot can review updates.
@@ -30,11 +70,23 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
 
       - name: Check out the exact source revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+
+      - name: Verify the source commit belongs to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          printf 'source-on-main=PASS\n'
 
       - name: Set up Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -105,7 +157,7 @@ jobs:
           result=$(aws ecr describe-images \
             --region "$AWS_REGION" \
             --repository-name "$ECR_REPOSITORY" \
-            --image-ids "imageTag=$GITHUB_SHA" 2>&1)
+            --image-ids "imageTag=$SOURCE_SHA" 2>&1)
           status=$?
           set -e
           if [ "$status" -eq 0 ]; then
@@ -138,9 +190,9 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.SOURCE_SHA }}
           labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Verify digest, ARM64 manifest, and source labels
@@ -154,7 +206,7 @@ jobs:
           details=$(aws ecr describe-images \
             --region "$AWS_REGION" \
             --repository-name "$ECR_REPOSITORY" \
-            --image-ids "imageTag=$GITHUB_SHA" \
+            --image-ids "imageTag=$SOURCE_SHA" \
             --query 'imageDetails[0].imageDigest' \
             --output text)
           test "$details" = "$INDEX_DIGEST"
@@ -208,7 +260,7 @@ jobs:
           from pathlib import Path
           config = json.loads(Path('/tmp/personalhub-config.json').read_text())
           labels = config.get('config', {}).get('Labels', {})
-          if labels.get('org.opencontainers.image.revision') != os.environ['GITHUB_SHA']:
+          if labels.get('org.opencontainers.image.revision') != os.environ['SOURCE_SHA']:
               raise SystemExit('Image revision label mismatch.')
           expected_source = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
           if labels.get('org.opencontainers.image.source') != expected_source:
@@ -298,6 +350,7 @@ jobs:
           printf 'arm64-digest=%s\n' "$arm_digest"
 
       - name: Wait for ECR scan and enforce the Critical gate
+        id: scan
         shell: bash
         env:
           ARM64_DIGEST: ${{ steps.artifact.outputs.arm64_digest }}
@@ -339,7 +392,32 @@ jobs:
           print('scan-counts=' + json.dumps(counts, sort_keys=True))
           if counts['CRITICAL'] != 0:
               raise SystemExit('Critical ECR findings block publication verification.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              for severity, count in counts.items():
+                  output.write(f'{severity.lower()}={count}\n')
           PY
+
+      - name: Record the verified publication summary
+        shell: bash
+        env:
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+          ARM64_DIGEST: ${{ steps.artifact.outputs.arm64_digest }}
+          SCAN_CRITICAL: ${{ steps.scan.outputs.critical }}
+          SCAN_HIGH: ${{ steps.scan.outputs.high }}
+          SCAN_MEDIUM: ${{ steps.scan.outputs.medium }}
+          SCAN_LOW: ${{ steps.scan.outputs.low }}
+        run: |
+          set -euo pipefail
+          {
+            printf '### Verified immutable publication\n\n'
+            printf -- '- Source SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- OCI index: `%s`\n' "$INDEX_DIGEST"
+            printf -- '- ARM64 manifest: `%s`\n' "$ARM64_DIGEST"
+            printf -- '- Provenance: PASS\n'
+            printf -- '- SPDX SBOM: PASS\n'
+            printf -- '- Scan: Critical %s, High %s, Medium %s, Low %s\n' \
+              "$SCAN_CRITICAL" "$SCAN_HIGH" "$SCAN_MEDIUM" "$SCAN_LOW"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove temporary verification files
         if: always()
