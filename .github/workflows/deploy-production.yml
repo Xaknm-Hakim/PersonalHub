@@ -1,0 +1,279 @@
+---
+name: Deploy immutable image to production
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Full lowercase Git SHA of the published production candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: personalhub-production-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: arn:aws:iam::210855481769:role/personalhub-production-github-deploy
+  ECR_REGISTRY: 210855481769.dkr.ecr.ap-southeast-1.amazonaws.com
+  ECR_REPOSITORY: personalhub-production
+  SSM_DOCUMENT: personalhub-production-deploy
+  INSTANCE_ID: i-0c60a9a2bca804257
+  DEPLOY_SHA: ${{ inputs.image_sha }}
+
+jobs:
+  deploy:
+    name: Validate and deploy production release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+
+    steps:
+      # Actions are pinned to immutable upstream commit SHAs; Dependabot can review updates.
+      - name: Require the intended manual main-branch context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out main with complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify the requested commit belongs to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$DEPLOY_SHA^{commit}"
+          git merge-base --is-ancestor "$DEPLOY_SHA" HEAD
+          printf 'commit-on-main=PASS\n'
+
+      - name: Configure temporary AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: PersonalHubGitHubDeploy-${{ github.run_id }}
+          output-credentials: false
+
+      - name: Verify assumed deploy-role identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          arn=$(aws sts get-caller-identity --query Arn --output text)
+          case "$arn" in
+            arn:aws:sts::210855481769:assumed-role/personalhub-production-github-deploy/*) ;;
+            *) exit 1 ;;
+          esac
+          printf 'assumed-role=personalhub-production-github-deploy\n'
+
+      - name: Verify immutable candidate metadata and security gate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          test "$(aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names "$ECR_REPOSITORY" \
+            --query 'repositories[0].imageTagMutability' \
+            --output text)" = "IMMUTABLE"
+
+          aws ecr batch-get-image \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$DEPLOY_SHA" \
+            --accepted-media-types application/vnd.oci.image.index.v1+json \
+            --output json > /tmp/personalhub-candidate.json
+
+          mapfile -t candidate_digests < <(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          response = json.loads(Path('/tmp/personalhub-candidate.json').read_text())
+          if response.get('failures') or len(response.get('images', [])) != 1:
+              raise SystemExit('The requested immutable candidate was not found.')
+          image = response['images'][0]
+          manifest = json.loads(image['imageManifest'])
+          candidates = [
+              item for item in manifest.get('manifests', [])
+              if item.get('platform', {}).get('os') == 'linux'
+              and item.get('platform', {}).get('architecture') == 'arm64'
+          ]
+          if len(candidates) != 1:
+              raise SystemExit('Expected exactly one linux/arm64 image manifest.')
+          index_digest = image['imageId']['imageDigest']
+          arm64_digest = candidates[0]['digest']
+          print(index_digest)
+          print(arm64_digest)
+          PY
+          )
+          test "${#candidate_digests[@]}" -eq 2
+          index_digest=${candidate_digests[0]}
+          arm64_digest=${candidate_digests[1]}
+          [[ "$index_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$arm64_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'index_digest=%s\n' "$index_digest" >> "$GITHUB_OUTPUT"
+          printf 'arm64_digest=%s\n' "$arm64_digest" >> "$GITHUB_OUTPUT"
+          printf 'platform=linux/arm64\n'
+
+          aws ecr batch-get-image \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageDigest=$arm64_digest" \
+            --accepted-media-types application/vnd.oci.image.manifest.v1+json \
+            --output json > /tmp/personalhub-arm64.json
+
+          config_digest=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          response = json.loads(Path('/tmp/personalhub-arm64.json').read_text())
+          if response.get('failures') or len(response.get('images', [])) != 1:
+              raise SystemExit('The ARM64 image manifest could not be read.')
+          print(json.loads(response['images'][0]['imageManifest'])['config']['digest'])
+          PY
+          )
+          config_url=$(aws ecr get-download-url-for-layer \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --layer-digest "$config_digest" \
+            --query downloadUrl \
+            --output text)
+          curl -fsSL "$config_url" --output /tmp/personalhub-config.json
+
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = json.loads(Path('/tmp/personalhub-config.json').read_text())
+          labels = config.get('config', {}).get('Labels', {})
+          if labels.get('org.opencontainers.image.revision') != os.environ['DEPLOY_SHA']:
+              raise SystemExit('Image revision label mismatch.')
+          expected_source = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+          if labels.get('org.opencontainers.image.source') != expected_source:
+              raise SystemExit('Image source label mismatch.')
+          print('source-labels=PASS')
+          PY
+
+          aws ecr describe-image-scan-findings \
+            --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-id "imageDigest=$arm64_digest" \
+            --output json > /tmp/personalhub-scan.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          scan = json.loads(Path('/tmp/personalhub-scan.json').read_text())
+          status = scan.get('imageScanStatus', {}).get('status')
+          counts = scan.get('imageScanFindings', {}).get('findingSeverityCounts', {})
+          critical = counts.get('CRITICAL', 0)
+          if status != 'COMPLETE' or critical != 0:
+              raise SystemExit('Candidate failed the ECR vulnerability gate.')
+          print('scan-status=COMPLETE')
+          print(f'scan-critical={critical}')
+          print(f"scan-high={counts.get('HIGH', 0)}")
+          print(f"scan-medium={counts.get('MEDIUM', 0)}")
+          print(f"scan-low={counts.get('LOW', 0)}")
+          PY
+
+          printf 'candidate-index-digest=%s\n' "$index_digest"
+          printf 'candidate-arm64-digest=%s\n' "$arm64_digest"
+
+      - name: Invoke the constrained production deployment document
+        id: command
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          parameters=$(jq -cn --arg sha "$DEPLOY_SHA" '{DeploySha:[$sha]}')
+          command_id=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "$SSM_DOCUMENT" \
+            --parameters "$parameters" \
+            --comment "PersonalHub production deployment $DEPLOY_SHA" \
+            --timeout-seconds 3600 \
+            --query 'Command.CommandId' \
+            --output text)
+          printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
+          printf 'ssm-command-submitted=PASS\n'
+
+      - name: Wait for bounded deployment completion
+        shell: bash
+        env:
+          COMMAND_ID: ${{ steps.command.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          completed=false
+          status=Pending
+          for _ in $(seq 1 90); do
+            set +e
+            status=$(aws ssm get-command-invocation \
+              --region "$AWS_REGION" \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query Status \
+              --output text 2>/dev/null)
+            query_status=$?
+            set -e
+            if [ "$query_status" -ne 0 ]; then
+              sleep 20
+              continue
+            fi
+            case "$status" in
+              Success|Cancelled|Failed|TimedOut|Cancelling)
+                completed=true
+                break
+                ;;
+              Pending|InProgress|Delayed)
+                sleep 20
+                ;;
+              *)
+                printf 'Unexpected SSM command status.\n' >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$completed" != true ]; then
+            printf 'Deployment polling timed out.\n' >&2
+            exit 1
+          fi
+
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent \
+            --output text > /tmp/personalhub-deploy.stdout
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent \
+            --output text > /tmp/personalhub-deploy.stderr
+
+          if [ "$status" != Success ]; then
+            printf 'deployment-status=%s\n' "$status" >&2
+            safe_failure_fields='^(target-sha|backup-object|migration-result|'
+            safe_failure_fields+='app-health|application-rollback|deployment-result)='
+            grep -E "$safe_failure_fields" /tmp/personalhub-deploy.stderr >&2 || true
+            exit 1
+          fi
+
+          grep -Fx 'deployment-result=PASS' /tmp/personalhub-deploy.stdout >/dev/null
+          grep -Fx "final-deployed-sha=$DEPLOY_SHA" /tmp/personalhub-deploy.stdout >/dev/null
+          safe_success_fields='^(target-sha|previous-sha|candidate-digest|backup-object|'
+          safe_success_fields+='migration-result|app-health|application-rollback|final-deployed-sha|'
+          safe_success_fields+='deployment-duration-seconds|deployment-result)='
+          grep -E "$safe_success_fields" /tmp/personalhub-deploy.stdout
+          printf 'deployment-status=Success\n'

@@ -1,10 +1,10 @@
-# Continuous integration and immutable image publication
+# Continuous integration, immutable publication, and manual deployment
 
 ## Phase boundary
 
-Phase 2C.1 adds application CI and a controlled, build-only GitHub Actions publication path. It does not deploy images, invoke Systems Manager, change `/etc/personalhub/release.env`, run production migrations, or restart production. GitHub cannot deploy PersonalHub in this phase.
+Phase 2C.1 added application CI and a controlled, build-only GitHub Actions publication path. The build role still cannot deploy images, invoke Systems Manager, read production secrets, run production migrations, or restart production.
 
-Phase 2C.2 will separately design and prove a manual `workflow_dispatch` deployment through SSM. Automatic promotion from `main` remains deferred until after that manual deployment workflow is proven.
+Phase 2C.2 adds a separate manual `workflow_dispatch` deployment through a constrained SSM document and a host-owned transactional helper. A push to `main` never deploys production. Automatic green-main promotion remains disabled and is deferred to Phase 2C.3.
 
 ## Repository and action integrity
 
@@ -56,7 +56,7 @@ Therefore another repository, fork, organization repository, branch, tag, or pul
 
 The workflow verifies that a dispatch targets `refs/heads/main`; that check does not configure GitHub branch protection. Protect `main` in the repository settings before treating it as a release-authority boundary.
 
-## Build-role permissions
+## Build and deploy role separation
 
 The build role can call global `ecr:GetAuthorizationToken`, which AWS does not support with repository resource scoping. These actions are restricted to the single `personalhub-production` ECR repository:
 
@@ -67,6 +67,20 @@ The build role can call global `ecr:GetAuthorizationToken`, which AWS does not s
 - image/config download reads used for verification.
 
 The role has no ECR delete permission and no permission for EC2, SSM, Parameter Store, backup S3, Terraform-state S3, IAM mutation, or Cloudflare. It cannot pull or restart production through an AWS management channel.
+
+The independent deployment role is:
+
+`arn:aws:iam::210855481769:role/personalhub-production-github-deploy`
+
+It uses the same exact audience and identity-qualified `main` subject, but has a different capability: read-only inspection of only the PersonalHub ECR repository and `ssm:SendCommand` against both the exact production instance and the custom `personalhub-production-deploy` document. The document accepts only a lowercase 40-character `DeploySha` and invokes only `/usr/local/sbin/personalhub-deploy "$SSM_DeploySha"`. Command-status reads require AWS's unscoped status APIs. The deploy role has no Parameter Store, Secrets Manager, backup S3, EC2 mutation, IAM mutation, ECR authentication/push/delete, Session Manager, Cloudflare, Terraform-state, or direct database permission.
+
+These roles intentionally split capabilities:
+
+- build role: GitHub to one ECR repository for candidate publication;
+- deploy role: GitHub to one fixed SSM deployment command on one production instance;
+- EC2 role: ECR pull, the two required production parameters, and PostgreSQL backup storage.
+
+GitHub tells the host only which reviewed SHA to deploy. The host role performs image pull, secret use, and pre-deployment backup without returning those credentials or secret values to GitHub.
 
 ## Controlled image publication
 
@@ -87,9 +101,28 @@ The workflow repeats the application validation gates before publication, then:
 
 The workflow never publishes or treats `latest` as a deployment identity. ECR tag immutability and a pre-upload tag check prevent replacement of an existing SHA artifact.
 
-ECR can scan only after an image has been uploaded. A failed scan therefore leaves an immutable but rejected candidate in the repository. Phase 2C.1 has no deployment path, and a future deployment workflow must independently require a completed scan with zero Critical findings before selecting any digest.
+ECR can scan only after an image has been uploaded. A failed scan therefore leaves an immutable but rejected candidate in the repository. The separate Phase 2C.2 deployment workflow independently requires a completed scan with zero Critical findings before selecting any digest.
 
-A successful publication only creates a candidate artifact. Production continues using the image explicitly selected in `/etc/personalhub/release.env` until a future, separately authorized deployment workflow changes it.
+A successful publication only creates a candidate artifact. Production continues using the image explicitly selected in `/etc/personalhub/release.env` until a separate manual deployment is authorized.
+
+## Manual production deployment
+
+`.github/workflows/deploy-production.yml` has only a `workflow_dispatch` trigger and requires an exact lowercase 40-character Git SHA. Before sending an SSM command it proves that the commit exists and is reachable from `main`, the immutable ECR tag exists, exactly one `linux/arm64` image manifest exists, source and revision labels match, scanning is complete, and Critical findings are zero.
+
+The workflow assumes only the deploy role and invokes the fixed custom SSM document. It cannot send arbitrary shell content. It polls the command with a bounded timeout and exposes only safe release, digest, backup, migration, health, and rollback status fields.
+
+The host helper serializes deployments with a non-blocking lock and then:
+
+1. validates the exact SHA and fixed ECR repository;
+2. verifies the current app, PostgreSQL, cloudflared, internal health, and public health;
+3. resolves the candidate index digest and ARM64 manifest, pulls by immutable digest, and checks source/revision labels;
+4. requires a new successful `personalhub-postgres-backup.service` run and records its S3 object;
+5. runs only `prisma migrate deploy` in the candidate image;
+6. atomically writes the exact candidate reference to `/etc/personalhub/release.env`;
+7. force-recreates only the app service;
+8. verifies bounded internal/public health and confirms PostgreSQL and cloudflared container identities did not change.
+
+If post-switch application health fails, the helper atomically restores the prior immutable release, recreates only the app, and reports whether application rollback recovered health. It never automatically restores PostgreSQL. A migration may not be backward compatible with the previous application; if rollback health fails, the database remains untouched, the pre-deployment S3 backup remains the recovery anchor, and an operator must perform a separately reviewed recovery.
 
 ## Operator commands
 
@@ -100,6 +133,8 @@ gh run list --workflow ci.yml
 gh workflow run publish-image.yml --ref main
 gh run list --workflow publish-image.yml
 gh run watch <run-id> --exit-status
+gh workflow run deploy-production.yml --ref main -f image_sha=<full-git-sha>
+gh run list --workflow deploy-production.yml
 ```
 
-Verify the resulting artifact independently through ECR before considering it deployable. A Phase 2C.1 publication must not be followed by SSM, Compose, migration, or host mutation commands.
+Publishing and deployment remain separate manual operations. Do not dispatch deployment merely because CI or publication succeeded.
