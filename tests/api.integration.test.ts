@@ -5,10 +5,12 @@ import { PATCH } from "@/app/api/v1/tasks/[id]/route";
 import { POST as complete } from "@/app/api/v1/tasks/[id]/complete/route";
 import { GET as today } from "@/app/api/v1/today/route";
 import { GET as upcoming } from "@/app/api/v1/upcoming/route";
+import { POST as capture } from "@/app/api/v1/capture/route";
 import { GET as health } from "@/app/api/health/route";
 import { todayDateOnly } from "@/lib/domain/dates";
-import { bootstrapOwner } from "@/lib/auth/owner";
+import { bootstrapOwner, loginOwner } from "@/lib/auth/owner";
 import { createApiToken, revokeApiToken } from "@/lib/auth/api-tokens";
+import { sessionCookieName } from "@/lib/auth/web-session";
 
 import {
   assertDisposableDatabase,
@@ -104,6 +106,82 @@ describe("task API contracts against PostgreSQL", () => {
         )
       ).status
     ).toBe(413);
+  });
+
+  it("keeps browser sessions separate from scoped external-client reads and capture", async () => {
+    const login = await loginOwner(
+      "correct horse battery staple",
+      "api-boundary-test"
+    );
+    if (!login.ok) throw new Error("Expected browser login to succeed.");
+    const cookieOnly = await today(
+      new Request("http://localhost/api/v1/today", {
+        headers: { cookie: `${sessionCookieName}=${login.token}` }
+      })
+    );
+    expect(cookieOnly.status).toBe(401);
+
+    const writeOnly = await createApiToken({
+      name: "Capture only",
+      scopes: ["write"]
+    });
+    expect(
+      (
+        await today(
+          new Request("http://localhost/api/v1/today", {
+            headers: { authorization: `Bearer ${writeOnly.plaintext}` }
+          })
+        )
+      ).status
+    ).toBe(403);
+
+    const readOnly = await createApiToken({
+      name: "Read only client",
+      scopes: ["read"]
+    });
+    expect(
+      (
+        await capture(
+          new Request("http://localhost/api/v1/capture", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${readOnly.plaintext}`,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ title: "Must not be created" })
+          })
+        )
+      ).status
+    ).toBe(403);
+
+    const captured = await capture(
+      request("http://localhost/api/v1/capture", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Capture from Quickshell" })
+      })
+    );
+    expect(captured.status).toBe(201);
+    expect(await captured.json()).toEqual({
+      data: {
+        id: expect.any(String),
+        title: "Capture from Quickshell",
+        description: null,
+        status: "todo",
+        priority: "medium",
+        startDate: null,
+        dueDate: null,
+        completedAt: null,
+        projectId: null,
+        tags: []
+      }
+    });
+    expect(
+      await prisma.task.count({ where: { title: "Capture from Quickshell" } })
+    ).toBe(1);
+    expect(
+      await prisma.task.count({ where: { title: "Must not be created" } })
+    ).toBe(0);
   });
 
   it("returns redacted validation/not-found responses and completes idempotently", async () => {
@@ -205,15 +283,21 @@ describe("task API contracts against PostgreSQL", () => {
     await prisma.project.updateMany({ data: { targetDate: date } });
     const response = await today(request("http://localhost/api/v1/today"));
     const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(
+      body.data.today.map((item: { title: string }) => item.title)
+    ).toEqual(["Milestone", "Quiz"]);
     expect(body.data.today).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ entity: "assignment", event: "deadline" }),
         expect.objectContaining({ entity: "project", event: "target" })
       ])
     );
-    expect(
-      (await upcoming(request("http://localhost/api/v1/upcoming"))).status
-    ).toBe(200);
+    const upcomingResponse = await upcoming(
+      request("http://localhost/api/v1/upcoming")
+    );
+    expect(upcomingResponse.status).toBe(200);
+    expect(await upcomingResponse.json()).toEqual({ data: [] });
   });
 
   it("rejects revoked bearer tokens while leaving health public and non-sensitive", async () => {
@@ -222,6 +306,20 @@ describe("task API contracts against PostgreSQL", () => {
     expect((await today(request("http://localhost/api/v1/today"))).status).toBe(
       401
     );
+    const expired = await createApiToken({
+      name: "Expired external client",
+      scopes: ["read"],
+      expiresAt: new Date(0)
+    });
+    expect(
+      (
+        await today(
+          new Request("http://localhost/api/v1/today", {
+            headers: { authorization: `Bearer ${expired.plaintext}` }
+          })
+        )
+      ).status
+    ).toBe(401);
     const response = await health();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ok" });

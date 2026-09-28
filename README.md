@@ -180,6 +180,7 @@ The archived seed file is intentionally not wired to an npm or Make command. Do 
 ## Reference contracts
 
 - [API contract](./docs/API.md)
+- [v3 platform boundary](./docs/PLATFORM-V3.md)
 - [Domain contract](./docs/DOMAIN.md)
 - [Testing and isolation rules](./docs/TESTING.md)
 - [Authentication and production security](./docs/SECURITY.md)
