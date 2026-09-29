@@ -13,6 +13,7 @@ import {
   refreshGoogleAccessToken,
   revokeGoogleAuthorization
 } from "./client";
+import { GoogleOAuthCallbackError } from "./callback-observability";
 import { GOOGLE_CALLBACK_PATH, GOOGLE_PROVIDER } from "./constants";
 import { syncGoogleCalendar, withGoogleSyncLease } from "./sync";
 
@@ -38,49 +39,107 @@ export async function googleIntegrationStatus() {
   });
 }
 
+type CompleteGoogleConnectionOptions = {
+  exchange?: typeof exchangeGoogleAuthorizationCode;
+  encryptCredential?: typeof encryptIntegrationCredential;
+  persistIntegration?: (input: {
+    integrationId: string;
+    encryptedRefreshToken: string;
+    connectedAt: Date;
+  }) => Promise<{ id: string }>;
+};
+
+function exchangeFailure(error: unknown) {
+  if (
+    error instanceof GoogleIntegrationError &&
+    error.code === "MISSING_REFRESH_TOKEN"
+  )
+    return new GoogleOAuthCallbackError("refresh_token");
+  if (
+    error instanceof GoogleIntegrationError &&
+    error.code === "INSUFFICIENT_SCOPE"
+  )
+    return new GoogleOAuthCallbackError("scope_validation");
+  return new GoogleOAuthCallbackError("token_exchange");
+}
+
 export async function completeGoogleConnection(
   code: string,
   codeVerifier: string,
-  exchange = exchangeGoogleAuthorizationCode
+  options: CompleteGoogleConnectionOptions = {}
 ) {
   const config = configuration();
-  const { refreshToken } = await exchange(
-    {
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      redirectUri: config.redirectUri
-    },
-    code,
-    codeVerifier
-  );
-  const existing = await prisma.integration.findUnique({
-    where: { provider: GOOGLE_PROVIDER },
-    select: { id: true }
-  });
+  const exchange = options.exchange ?? exchangeGoogleAuthorizationCode;
+  logEvent("info", "google_oauth_token_exchange_started");
+  let refreshToken: string;
+  try {
+    ({ refreshToken } = await exchange(
+      {
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        redirectUri: config.redirectUri
+      },
+      code,
+      codeVerifier
+    ));
+  } catch (error) {
+    throw exchangeFailure(error);
+  }
+  logEvent("info", "google_oauth_token_exchange_succeeded");
+  logEvent("info", "google_oauth_refresh_credential_present");
+  logEvent("info", "google_oauth_scopes_valid");
+
+  let existing: { id: string } | null;
+  try {
+    existing = await prisma.integration.findUnique({
+      where: { provider: GOOGLE_PROVIDER },
+      select: { id: true }
+    });
+  } catch {
+    throw new GoogleOAuthCallbackError("persistence");
+  }
   const integrationId = existing?.id ?? randomUUID();
-  const encryptedRefreshToken = encryptIntegrationCredential(
-    refreshToken,
-    config.encryptionKey,
-    { integrationId, provider: GOOGLE_PROVIDER }
-  );
+  let encryptedRefreshToken: string;
+  try {
+    encryptedRefreshToken = (
+      options.encryptCredential ?? encryptIntegrationCredential
+    )(refreshToken, config.encryptionKey, {
+      integrationId,
+      provider: GOOGLE_PROVIDER
+    });
+  } catch {
+    throw new GoogleOAuthCallbackError("credential_encryption");
+  }
+
   const connectedAt = new Date();
-  const integration = await prisma.integration.upsert({
-    where: { provider: GOOGLE_PROVIDER },
-    create: {
-      id: integrationId,
-      provider: GOOGLE_PROVIDER,
-      status: "connected",
-      encryptedRefreshToken,
-      connectedAt,
-      lastSyncErrorCode: null
-    },
-    update: {
-      status: "connected",
-      encryptedRefreshToken,
-      connectedAt,
-      lastSyncErrorCode: null
-    }
-  });
+  let integration: { id: string };
+  try {
+    integration = options.persistIntegration
+      ? await options.persistIntegration({
+          integrationId,
+          encryptedRefreshToken,
+          connectedAt
+        })
+      : await prisma.integration.upsert({
+          where: { provider: GOOGLE_PROVIDER },
+          create: {
+            id: integrationId,
+            provider: GOOGLE_PROVIDER,
+            status: "connected",
+            encryptedRefreshToken,
+            connectedAt,
+            lastSyncErrorCode: null
+          },
+          update: {
+            status: "connected",
+            encryptedRefreshToken,
+            connectedAt,
+            lastSyncErrorCode: null
+          }
+        });
+  } catch {
+    throw new GoogleOAuthCallbackError("persistence");
+  }
   logEvent("info", "google_integration_connected", {
     provider: GOOGLE_PROVIDER,
     integrationId: integration.id,

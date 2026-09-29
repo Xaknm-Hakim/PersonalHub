@@ -383,6 +383,44 @@ try {
     .waitFor();
 
   await goto("/settings");
+  const googleCallbackFailures = [
+    [
+      "transaction_validation",
+      "Google connection failed during OAuth transaction validation."
+    ],
+    [
+      "session_validation",
+      "Google connection failed because the initiating owner session is no longer valid."
+    ],
+    [
+      "authorization_code",
+      "Google connection failed because the authorization response was incomplete."
+    ],
+    ["token_exchange", "Google connection failed during token exchange."],
+    [
+      "refresh_token",
+      "Google connection failed because no refresh authorization was returned."
+    ],
+    [
+      "scope_validation",
+      "Google connection failed because the granted scopes did not match."
+    ],
+    [
+      "credential_encryption",
+      "Google connection failed while protecting the refresh authorization."
+    ],
+    ["persistence", "Google connection failed while saving the connection."],
+    [
+      "callback_processing",
+      "Google connection failed while processing the callback."
+    ]
+  ];
+  for (const [stage, message] of googleCallbackFailures) {
+    await goto(`/settings?google=callback_error&stage=${stage}`);
+    await page.getByText(message, { exact: true }).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get("stage"), stage);
+  }
+  await goto("/settings");
   await page.getByLabel("Token name").fill(apiTokenName);
   await page.getByLabel("Write").check();
   await page.getByRole("button", { name: "Create token" }).click();

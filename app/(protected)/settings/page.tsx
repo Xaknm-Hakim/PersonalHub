@@ -30,10 +30,37 @@ const googleMessages: Record<string, string> = {
     "Google Calendar synchronization did not complete. It is safe to retry."
 };
 
+const googleCallbackFailureMessages: Record<string, string> = {
+  transaction_validation:
+    "Google connection failed during OAuth transaction validation.",
+  session_validation:
+    "Google connection failed because the initiating owner session is no longer valid.",
+  authorization_code:
+    "Google connection failed because the authorization response was incomplete.",
+  token_exchange: "Google connection failed during token exchange.",
+  refresh_token:
+    "Google connection failed because no refresh authorization was returned.",
+  scope_validation:
+    "Google connection failed because the granted scopes did not match.",
+  credential_encryption:
+    "Google connection failed while protecting the refresh authorization.",
+  persistence: "Google connection failed while saving the connection.",
+  callback_processing: "Google connection failed while processing the callback."
+};
+
+function googleMessage(params: { google?: string; stage?: string }) {
+  if (params.google === "callback_error" && params.stage)
+    return (
+      googleCallbackFailureMessages[params.stage] ??
+      googleMessages.callback_error
+    );
+  return params.google ? googleMessages[params.google] : undefined;
+}
+
 export default async function SettingsPage({
   searchParams
 }: {
-  searchParams: Promise<{ google?: string }>;
+  searchParams: Promise<{ google?: string; stage?: string }>;
 }) {
   const [tokens, google, params] = await Promise.all([
     listApiTokens(),
@@ -42,6 +69,7 @@ export default async function SettingsPage({
   ]);
   const googleConnected = google?.status === "connected";
   const googleConfigured = googleIntegrationIsConfigured();
+  const statusMessage = googleMessage(params);
   return (
     <>
       <PageHeader title="Settings / About" description="PersonalHub 0.1.0" />
@@ -51,10 +79,8 @@ export default async function SettingsPage({
             <CardTitle>Google Calendar</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            {params.google && googleMessages[params.google] ? (
-              <p className="rounded-md border p-3">
-                {googleMessages[params.google]}
-              </p>
+            {statusMessage ? (
+              <p className="rounded-md border p-3">{statusMessage}</p>
             ) : null}
             {googleConnected ? (
               <>
