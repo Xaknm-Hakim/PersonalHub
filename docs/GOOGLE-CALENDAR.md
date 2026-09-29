@@ -163,6 +163,14 @@ Do these steps personally; do not send credentials through chat.
 7. Do not add wildcard, HTTP, localhost, alternate-host, or trailing-slash production redirects.
 8. For an External app, add the owner Google account as a test user while testing. Before relying on durable offline authorization, move the app to **In production** and complete any Google verification that its scope/configuration requires.
 
+The production Branding targets are:
+
+- application homepage: <https://personalhub.studexhub.com/about>;
+- privacy policy: <https://personalhub.studexhub.com/privacy>;
+- terms of service: intentionally omitted because this personal-use deployment does not require a separate terms page.
+
+The OAuth application remains in **Testing** until these public pages are deployed and verified. Publishing it to **In production** is a later manual step; this repository change does not publish the Google OAuth application.
+
 Google currently limits Testing projects to 100 listed test users and expires their authorization, including refresh tokens for non-profile offline scopes, seven days after consent. In-production projects avoid this testing-mode seven-day expiry, though refresh tokens can still become invalid through revocation, inactivity, password/policy events, user limits, or other Google policy:
 
 - <https://support.google.com/cloud/answer/15549945>

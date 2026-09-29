@@ -110,6 +110,45 @@ try {
   assert.equal(healthHeaders["strict-transport-security"], undefined);
   const anonymousApi = await json("/api/v1/today");
   assert.equal(anonymousApi.response.status(), 401);
+
+  const aboutResponse = await page.goto("/about");
+  assert.equal(aboutResponse?.status(), 200);
+  await page
+    .getByRole("heading", { name: "About PersonalHub", exact: true })
+    .waitFor();
+  await page
+    .getByText("private, single-owner system", { exact: false })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Privacy policy" }).count(),
+    1
+  );
+  assert.equal(
+    await page.getByRole("heading", { name: "Dashboard" }).count(),
+    0
+  );
+  assert.equal((await context.cookies()).length, 0);
+  await page.screenshot({ path: `${artifacts}/about.png`, fullPage: true });
+
+  const privacyResponse = await page.goto("/privacy");
+  assert.equal(privacyResponse?.status(), 200);
+  await page
+    .getByRole("heading", { name: "Privacy policy", exact: true })
+    .waitFor();
+  await page.getByText("calendar.app.created", { exact: true }).waitFor();
+  await page
+    .getByText("calendar.calendarlist.readonly", { exact: true })
+    .waitFor();
+  await page
+    .getByText("does not sell Google user data", { exact: false })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("heading", { name: "Dashboard" }).count(),
+    0
+  );
+  assert.equal((await context.cookies()).length, 0);
+  await page.screenshot({ path: `${artifacts}/privacy.png`, fullPage: true });
+
   await goto("/");
   await page.waitForURL(/\/login$/);
   await page.getByRole("heading", { name: "Sign in to PersonalHub" }).waitFor();
