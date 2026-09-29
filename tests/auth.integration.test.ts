@@ -5,6 +5,7 @@ import {
   bootstrapOwner,
   loginOwner,
   revokeSession,
+  validateSessionId,
   validateSessionToken
 } from "@/lib/auth/owner";
 import {
@@ -55,6 +56,11 @@ describe("single-owner authentication", () => {
     expect(await validateSessionToken(accepted.token)).toMatchObject({
       ownerId: "owner"
     });
+    const acceptedSession = await validateSessionToken(accepted.token);
+    expect(await validateSessionId(acceptedSession!.id)).toMatchObject({
+      id: acceptedSession!.id,
+      ownerId: "owner"
+    });
     const another = await loginOwner(
       "correct horse battery staple",
       "second-device"
@@ -73,6 +79,8 @@ describe("single-owner authentication", () => {
     if (!login.ok) throw new Error("Expected login to succeed.");
 
     await prisma.session.updateMany({ data: { expiresAt: new Date(0) } });
+    const expiredSession = await prisma.session.findFirst();
+    expect(await validateSessionId(expiredSession!.id)).toBeNull();
     expect(await validateSessionToken(login.token)).toBeNull();
 
     const second = await loginOwner(
@@ -80,7 +88,9 @@ describe("single-owner authentication", () => {
       "test-client"
     );
     if (!second.ok) throw new Error("Expected login to succeed.");
+    const revokedSession = await validateSessionToken(second.token);
     await revokeSession(second.token);
+    expect(await validateSessionId(revokedSession!.id)).toBeNull();
     expect(await validateSessionToken(second.token)).toBeNull();
 
     const stale = await loginOwner(

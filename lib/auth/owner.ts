@@ -150,6 +150,25 @@ export async function validateSessionToken(token: string) {
   };
 }
 
+export async function validateSessionId(id: string) {
+  if (!/^[A-Za-z0-9_-]{1,191}$/.test(id)) return null;
+  const session = await prisma.session.findUnique({
+    where: { id },
+    include: { owner: { select: { authVersion: true } } }
+  });
+  if (
+    !session ||
+    session.expiresAt <= new Date() ||
+    session.authVersion !== session.owner.authVersion
+  )
+    return null;
+  return {
+    id: session.id,
+    ownerId: session.ownerId,
+    expiresAt: session.expiresAt
+  };
+}
+
 export async function revokeSession(token: string) {
   if (!token) return;
   await prisma.session.deleteMany({

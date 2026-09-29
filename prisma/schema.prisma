@@ -138,3 +138,36 @@ model Tag {
   assignments Assignment[] @relation("AssignmentTags")
   notes Note[] @relation("NoteTags")
 }
+
+model Integration {
+  id                      String @id @default(cuid())
+  provider                String @unique
+  status                  String @default("connected")
+  encryptedRefreshToken   String?
+  externalAccountIdentity String?
+  externalCalendarId      String?
+  connectedAt             DateTime?
+  lastSuccessfulSyncAt    DateTime?
+  lastSyncErrorCode       String?
+  syncLeaseId             String?
+  syncLeaseExpiresAt      DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  externalResources       ExternalResource[]
+}
+
+model ExternalResource {
+  id                 String @id @default(cuid())
+  integrationId      String
+  provider           String
+  localEntityType    String
+  localEntityId      String
+  externalResourceId String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  integration        Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, localEntityType, localEntityId])
+  @@unique([integrationId, externalResourceId])
+  @@index([integrationId])
+}

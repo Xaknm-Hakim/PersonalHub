@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { listApiTokens } from "@/lib/auth/api-tokens";
 import { ApiTokenForm } from "./api-token-form";
 import { revokeApiTokenAction } from "./actions";
+import { googleIntegrationStatus } from "@/services/integrations/google/service";
+import { googleIntegrationIsConfigured } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +17,100 @@ const formatTimestamp = (value: Date | null) =>
         .replace(/\.\d{3}Z$/, " UTC")
     : "Never";
 
-export default async function SettingsPage() {
-  const tokens = await listApiTokens();
+const googleMessages: Record<string, string> = {
+  connected: "Google Calendar connected.",
+  synced: "Google Calendar projection synchronized.",
+  disconnected:
+    "Google Calendar disconnected. Existing Google calendar data was preserved.",
+  state_error:
+    "Google authorization state was invalid or expired. Please try again.",
+  authorization_denied: "Google authorization was not granted.",
+  callback_error: "Google authorization could not be completed.",
+  sync_error:
+    "Google Calendar synchronization did not complete. It is safe to retry."
+};
+
+export default async function SettingsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ google?: string }>;
+}) {
+  const [tokens, google, params] = await Promise.all([
+    listApiTokens(),
+    googleIntegrationStatus(),
+    searchParams
+  ]);
+  const googleConnected = google?.status === "connected";
+  const googleConfigured = googleIntegrationIsConfigured();
   return (
     <>
       <PageHeader title="Settings / About" description="PersonalHub 0.1.0" />
       <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Google Calendar</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            {params.google && googleMessages[params.google] ? (
+              <p className="rounded-md border p-3">
+                {googleMessages[params.google]}
+              </p>
+            ) : null}
+            {googleConnected ? (
+              <>
+                <div className="space-y-1 text-muted-foreground">
+                  <p>
+                    Status: <span className="text-foreground">Connected</span>
+                  </p>
+                  <p>Calendar: PersonalHub</p>
+                  <p>
+                    Last successful sync:{" "}
+                    {formatTimestamp(google.lastSuccessfulSyncAt)}
+                  </p>
+                  {google.lastSyncErrorCode ? (
+                    <p className="text-destructive">
+                      Last sync needs attention: {google.lastSyncErrorCode}
+                    </p>
+                  ) : null}
+                </div>
+                <p className="text-muted-foreground">
+                  PersonalHub is authoritative. Sync Now projects open dated
+                  tasks and assignments one way; Google-side edits may be
+                  overwritten.
+                </p>
+                <div className="flex gap-2">
+                  <form method="post" action="/api/v1/integrations/google/sync">
+                    <Button type="submit">Sync Now</Button>
+                  </form>
+                  <form
+                    method="post"
+                    action="/api/v1/integrations/google/disconnect"
+                  >
+                    <Button type="submit" variant="outline">
+                      Disconnect
+                    </Button>
+                  </form>
+                </div>
+              </>
+            ) : googleConfigured ? (
+              <>
+                <p className="text-muted-foreground">
+                  Not connected. PersonalHub requests access only to calendars
+                  it creates for this projection.
+                </p>
+                <Button asChild>
+                  <a href="/api/v1/integrations/google/connect">
+                    Connect Google
+                  </a>
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                Google Calendar is not configured for this environment.
+              </p>
+            )}
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>Create API token</CardTitle>

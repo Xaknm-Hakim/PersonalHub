@@ -28,3 +28,65 @@ export function validateServerEnvironment(
     trustProxy: env.PERSONALHUB_TRUST_PROXY === "true"
   };
 }
+
+function requireIntegrationValue(name: string, value: string | undefined) {
+  if (!value) throw new Error(`${name} is required for Google integration.`);
+  return value;
+}
+
+export function googleIntegrationEnv(
+  environment: ServerEnvironment = process.env
+) {
+  const clientId = requireIntegrationValue(
+    "PERSONALHUB_GOOGLE_CLIENT_ID",
+    environment.PERSONALHUB_GOOGLE_CLIENT_ID
+  );
+  const clientSecret = requireIntegrationValue(
+    "PERSONALHUB_GOOGLE_CLIENT_SECRET",
+    environment.PERSONALHUB_GOOGLE_CLIENT_SECRET
+  );
+  const encryptionKey = requireIntegrationValue(
+    "PERSONALHUB_INTEGRATION_ENCRYPTION_KEY",
+    environment.PERSONALHUB_INTEGRATION_ENCRYPTION_KEY
+  );
+  const publicOrigin = requireIntegrationValue(
+    "PERSONALHUB_PUBLIC_ORIGIN",
+    environment.PERSONALHUB_PUBLIC_ORIGIN
+  );
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(publicOrigin);
+  } catch {
+    throw new Error(
+      "PERSONALHUB_PUBLIC_ORIGIN must be an absolute HTTPS origin."
+    );
+  }
+  if (
+    parsedOrigin.protocol !== "https:" ||
+    parsedOrigin.origin !== publicOrigin ||
+    parsedOrigin.username ||
+    parsedOrigin.password
+  )
+    throw new Error(
+      "PERSONALHUB_PUBLIC_ORIGIN must be an absolute HTTPS origin."
+    );
+  if (
+    !/^[A-Za-z0-9+/]{43}=$/.test(encryptionKey) ||
+    Buffer.from(encryptionKey, "base64").length !== 32
+  )
+    throw new Error(
+      "PERSONALHUB_INTEGRATION_ENCRYPTION_KEY must encode exactly 32 bytes."
+    );
+  return { clientId, clientSecret, encryptionKey, publicOrigin };
+}
+
+export function googleIntegrationIsConfigured(
+  environment: ServerEnvironment = process.env
+) {
+  try {
+    googleIntegrationEnv(environment);
+    return true;
+  } catch {
+    return false;
+  }
+}
