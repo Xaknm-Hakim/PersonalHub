@@ -73,5 +73,8 @@ output "production_secret_parameter_names" {
   value = {
     postgres_password       = aws_ssm_parameter.postgres_password.name
     cloudflare_tunnel_token = aws_ssm_parameter.cloudflare_tunnel_token.name
+    google_client_id        = aws_ssm_parameter.google_client_id.name
+    google_client_secret    = aws_ssm_parameter.google_client_secret.name
+    integration_key         = aws_ssm_parameter.integration_encryption_key.name
   }
 }

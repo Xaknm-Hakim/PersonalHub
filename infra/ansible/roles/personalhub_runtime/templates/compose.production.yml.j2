@@ -39,6 +39,10 @@ services:
       PERSONALHUB_DATABASE_URL: ${PERSONALHUB_DATABASE_URL:?runtime environment not materialized}
       PERSONALHUB_TRUST_PROXY: "true"
       PERSONALHUB_TIME_ZONE: "{{ personalhub_time_zone }}"
+      PERSONALHUB_PUBLIC_ORIGIN: "https://personalhub.studexhub.com"
+      PERSONALHUB_GOOGLE_CLIENT_ID: ${PERSONALHUB_GOOGLE_CLIENT_ID:?runtime environment not materialized}
+      PERSONALHUB_GOOGLE_CLIENT_SECRET: ${PERSONALHUB_GOOGLE_CLIENT_SECRET:?runtime environment not materialized}
+      PERSONALHUB_INTEGRATION_ENCRYPTION_KEY: ${PERSONALHUB_INTEGRATION_ENCRYPTION_KEY:?runtime environment not materialized}
       TZ: Etc/UTC
     depends_on:
       postgres:

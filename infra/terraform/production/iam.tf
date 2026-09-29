@@ -84,6 +84,9 @@ data "aws_iam_policy_document" "host" {
     resources = [
       local.production_parameter_arns.postgres_password,
       local.production_parameter_arns.cloudflare_tunnel_token,
+      local.production_parameter_arns.google_client_id,
+      local.production_parameter_arns.google_client_secret,
+      local.production_parameter_arns.integration_key,
     ]
   }
 }

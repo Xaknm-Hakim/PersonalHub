@@ -153,3 +153,57 @@ variable "production_cloudflare_tunnel_token_version" {
     error_message = "production_cloudflare_tunnel_token_version must be a positive integer."
   }
 }
+
+variable "production_google_client_id" {
+  description = "Write-only Google OAuth web client ID for the production integration."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+\\.apps\\.googleusercontent\\.com$", var.production_google_client_id))
+    error_message = "production_google_client_id must be a Google OAuth web client ID."
+  }
+}
+
+variable "production_google_client_id_version" {
+  description = "Increment to intentionally rotate the write-only Google OAuth client ID."
+  type        = number
+  default     = 1
+}
+
+variable "production_google_client_secret" {
+  description = "Write-only Google OAuth web client secret for the production integration."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = length(var.production_google_client_secret) >= 20 && can(regex("^[A-Za-z0-9._-]+$", var.production_google_client_secret))
+    error_message = "production_google_client_secret has an invalid format."
+  }
+}
+
+variable "production_google_client_secret_version" {
+  description = "Increment to intentionally rotate the write-only Google OAuth client secret."
+  type        = number
+  default     = 1
+}
+
+variable "production_integration_encryption_key" {
+  description = "Write-only base64-encoded 256-bit key for production integration credential encryption."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9+/]{43}=$", var.production_integration_encryption_key))
+    error_message = "production_integration_encryption_key must be standard base64 for exactly 32 bytes."
+  }
+}
+
+variable "production_integration_encryption_key_version" {
+  description = "Increment only for a coordinated integration-encryption key rotation."
+  type        = number
+  default     = 1
+}
