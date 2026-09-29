@@ -30,16 +30,19 @@ Never store application secrets, database passwords, owner credentials, or Terra
 
 ## Production secret parameters
 
-Terraform owns two Standard-tier SSM Parameter Store `SecureString` resources encrypted with the default AWS-managed SSM key:
+Terraform owns five Standard-tier SSM Parameter Store `SecureString` resources encrypted with the default AWS-managed SSM key:
 
 - `/personalhub/production/postgres/password`
 - `/personalhub/production/cloudflare/tunnel-token`
+- `/personalhub/production/google/client-id`
+- `/personalhub/production/google/client-secret`
+- `/personalhub/production/integration/encryption-key`
 
-Their values enter Terraform only through ephemeral, sensitive input variables and the AWS provider's write-only `value_wo` argument. Plaintext is therefore omitted from configuration, saved plans, output, and state. Creating or rotating either parameter requires supplying its ephemeral value and incrementing the corresponding non-secret write-only version variable. Operators should retrieve an existing value from SSM directly into process memory when a routine no-change plan needs the required ephemeral input; do not write it to a tfvars file.
+Their values enter Terraform only through ephemeral, sensitive input variables and the AWS provider's write-only `value_wo` argument. Plaintext is therefore omitted from configuration, saved plans, output, and state. Creating or rotating a parameter requires supplying its ephemeral value and incrementing the corresponding non-secret write-only version variable. Operators should retrieve an existing value from SSM directly into process memory when a routine no-change plan needs the required ephemeral input; do not write it to a tfvars file.
 
-The EC2 role can call only `ssm:GetParameter` and `ssm:GetParameters` on those two exact parameter ARNs. It has no wildcard Parameter Store access. The owner bootstrap password is deliberately excluded because it is a one-time interactive input, not a deployment secret.
+The EC2 role can call only `ssm:GetParameter` and `ssm:GetParameters` on those five exact parameter ARNs. It has no wildcard Parameter Store access. The GitHub build and deploy roles receive no access to these parameters. The owner bootstrap password is deliberately excluded because it is a one-time interactive input, not a deployment secret.
 
-The initial PostgreSQL password is generated locally with a cryptographically secure URL-safe generator and exists outside AWS only for the ephemeral Terraform handoff. The existing Cloudflare Tunnel token is read from a temporary owner-only file for the same handoff; that file is removed only after AWS confirms the parameter and the EC2 role proves it can retrieve it. Rotate either secret by supplying a new ephemeral value and incrementing only its corresponding write-only version. A future runtime phase may retrieve these parameters with the instance role and atomically materialize the minimum root-owned, mode-0600 configuration under `/etc/personalhub`; Terraform and Ansible variables must never contain the plaintext. Cloudflare tunnel/DNS configuration, PostgreSQL startup, Compose configuration, and owner initialization remain outside this secret-foundation phase.
+The initial PostgreSQL password and integration encryption key are generated locally with cryptographically secure generators and exist outside AWS only for the ephemeral Terraform handoff. Google OAuth credentials are entered only through hidden local prompts after being created in Google Cloud. Existing values are retrieved directly into process memory for subsequent plans. Rotate a secret by supplying a new ephemeral value and incrementing only its corresponding write-only version. The host materializer retrieves exact parameters and atomically writes the minimum root-owned, mode-0600 configuration under `/etc/personalhub`; Terraform and Ansible variables never contain plaintext values.
 
 ## Prerequisites
 
@@ -102,14 +105,14 @@ terraform plan -out=production.tfplan
 terraform apply production.tfplan
 ```
 
-The production stack manages 42 resources after the Ansible transport, production-secret, GitHub publication, and manual-deployment amendments:
+The production stack manages 45 resources after the Ansible transport, production-secret, GitHub publication, and manual-deployment amendments:
 
 - networking (13): VPC, Internet Gateway, subnet, route table, default route, route-table association, zero-ingress security group, and six explicit egress rules;
 - IAM (4): EC2 role, SSM managed-policy attachment, least-privilege inline ECR/backup policy, and instance profile;
 - registry (2): private ECR repository and lifecycle policy;
 - backup storage (7): S3 bucket, ownership controls, public-access block, versioning, encryption, lifecycle configuration, and TLS-enforcement policy;
 - Ansible transport (7): non-versioned S3 bucket, ownership controls, public-access block, encryption, one-day lifecycle cleanup, TLS-enforcement policy, and an unattached least-privilege controller policy;
-- production secrets (2): write-only SSM SecureString parameters for the PostgreSQL password and existing Cloudflare Tunnel token;
+- production secrets (5): write-only SSM SecureString parameters for the PostgreSQL password, existing Cloudflare Tunnel token, Google OAuth client ID and secret, and integration-encryption key;
 - GitHub publication identity (3): account-level GitHub Actions OIDC provider, main-branch build role, and repository-scoped ECR publication policy;
 - GitHub deployment identity (3): main-branch deploy role, constrained SSM/ECR-read policy, and fixed-command SSM document;
 - compute (1): ARM64 EC2 instance with its encrypted root EBS volume managed as part of the instance resource.

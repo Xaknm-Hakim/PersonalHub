@@ -96,10 +96,46 @@ The browser remains responsible for editing, organizing, reviewing, project mana
 
 ## Planning labels
 
-- v3.1: external-client foundation and Quickshell
-- v3.2: integration foundation, only after the first client exposes concrete needs
-- v3.3: Google Calendar
+- v3.1: external-client foundation and Quickshell (complete)
+- v3.2: Google integration foundation and manual one-way Calendar projection
+- v3.3: continuous/background Calendar synchronization and possible inbound semantics
 - v3.4: background jobs and notifications
 - v3.5: Gmail-derived actions
 
 These are planning labels, not architecture commitments. Each later milestone must justify its own storage and runtime machinery.
+
+## v3.2: manual Google Calendar projection
+
+v3.2 keeps PersonalHub authoritative and adds one bounded projection:
+
+```text
+PersonalHub -> dedicated Google Calendar -> Samsung Calendar
+```
+
+Settings owns the Google OAuth web-server flow and requests only
+`calendar.app.created` plus `calendar.calendarlist.readonly`; the latter is
+needed to recover an app-created calendar after a remote-success/local-failure
+window. Refresh authorization is encrypted at rest with AES-256-GCM under a
+dedicated SSM-materialized key. `Integration` stores the single Google
+connection, renewable sync lease, and compact sync state; `ExternalResource`
+maps each eligible local entity to its managed Google event.
+
+`Sync Now` projects open dated tasks and assignments as all-day events. Stored
+event IDs plus deterministic provider IDs make repeated runs idempotent and
+resumable across the non-atomic Google/PostgreSQL boundary. Sources that are
+deleted or become ineligible remove only their mapped managed event. Unrelated
+Google events are never touched.
+
+The calendar description carries a stable non-secret integration marker. A
+missing recorded calendar is rediscovered by exact marker, never by title;
+multiple marker matches stop safely for operator resolution. An atomic,
+renewable, expiring PostgreSQL lease serializes manual sync requests.
+
+Google-side edits are not imported and may be overwritten by the next manual
+sync. Disconnect revokes authorization when possible and always erases the
+local encrypted credential, while preserving the dedicated calendar and its
+events. There is no background sync, webhook, queue, scheduler, inbound merge,
+or conflict resolution in v3.2.
+
+See [Google Calendar projection](./GOOGLE-CALENDAR.md) for OAuth, encryption,
+Google Cloud setup, reconciliation, and production provisioning details.

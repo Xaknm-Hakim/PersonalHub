@@ -18,13 +18,13 @@ All three services use `restart: unless-stopped`. Docker therefore restarts them
 
 ## Secrets and release identity
 
-`/usr/local/sbin/personalhub-materialize-runtime-env` retrieves only `/personalhub/production/postgres/password` through the EC2 instance role. It validates the expected URL-safe format, constructs the PostgreSQL URL in process memory, and atomically writes `/etc/personalhub/runtime.env` as `root:root` mode `0600`.
+`/usr/local/sbin/personalhub-materialize-runtime-env` retrieves exactly the PostgreSQL password, Google OAuth client ID, Google OAuth client secret, and integration encryption key parameters through the EC2 instance role. It validates each expected format, constructs the PostgreSQL URL in process memory, and atomically writes `/etc/personalhub/runtime.env` as `root:root` mode `0600`. It prints only a pass/fail status, never parameter values.
 
 `/usr/local/sbin/personalhub-materialize-cloudflared-token` independently retrieves only `/personalhub/production/cloudflare/tunnel-token` and atomically writes `/etc/personalhub/cloudflared-token` as `root:root` mode `0600`. Compose mounts that dedicated file read-only only into cloudflared and invokes the official `--token-file` interface, so the token is not placed in general Compose environment metadata or exposed to the application or PostgreSQL. The official image normally runs as an unprivileged UID; this service runs as container root solely because the required host file is root-owned mode `0600`, while retaining a read-only filesystem, all capabilities dropped, and `no-new-privileges`.
 
 The non-secret `/etc/personalhub/release.env` contains the exact immutable ECR image reference. Ansible intentionally does not manage this file so future CI/CD can own release selection without changing static host configuration. `/usr/local/sbin/personalhub-compose` combines the release and runtime files for root-only Compose operations.
 
-Compose injects the PostgreSQL password and application database URL into container environments. Docker stores configured environment values in container metadata, so root and members of the root-equivalent `docker` group can inspect them. Mode `0600`, SSM-only administration, a locked runtime account, and tightly limited operator access are the current boundary; this is not equivalent to a dedicated runtime secrets service.
+Compose injects the PostgreSQL password, application database URL, Google OAuth client configuration, and integration encryption key into the app container environment. Docker stores configured environment values in container metadata, so root and members of the root-equivalent `docker` group can inspect them. Mode `0600`, SSM-only administration, a locked runtime account, and tightly limited operator access are the current boundary; this is not equivalent to a dedicated runtime secrets service.
 
 ## Migration and startup lifecycle
 
