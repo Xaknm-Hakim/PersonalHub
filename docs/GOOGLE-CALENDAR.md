@@ -43,6 +43,8 @@ The authorization request uses:
 
 The ordinary owner cookie remains `SameSite=Strict` and is not expected on Google's cross-site redirect. The callback instead requires the signed transaction and verifies that its bound session still exists, is unexpired, and still matches the owner's authentication version. It never falls back to another current session, mere owner existence, or API bearer authentication. The transaction cookie is single-use and cleared before callback processing. Its signing key is purpose-separated from the integration encryption key using HKDF-SHA-256. API bearer tokens cannot initiate, complete, synchronize, or disconnect this browser-owned integration.
 
+The production application requires outbound HTTPS for the Google OAuth token endpoint and Google Calendar API. It uses a dedicated outbound-capable Docker network for those provider requests while retaining the internal backend for PostgreSQL and tunnel-origin traffic. That egress network publishes no host ports and creates no inbound application path; Cloudflare Tunnel remains the only application ingress.
+
 Google's current security guidance requires secure storage for client credentials and user tokens and recommends encrypted-at-rest refresh tokens for server applications:
 
 - <https://developers.google.com/identity/protocols/oauth2/resources/best-practices>

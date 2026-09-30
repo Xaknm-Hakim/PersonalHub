@@ -10,9 +10,10 @@ The static Compose definition is managed by Ansible at `/opt/personalhub/compose
 - `app`: an immutable PersonalHub ECR image selected by deployment-owned release metadata;
 - `cloudflared`: the pinned official ARM64 connector image for the remotely managed `personalhub-prod` tunnel;
 - `personalhub-production-backend`: an internal Docker network shared by PostgreSQL, PersonalHub, and cloudflared;
+- `personalhub-production-app-egress`: an outbound-capable Docker network attached only to PersonalHub for provider HTTPS APIs;
 - `personalhub-production-edge`: an egress-capable Docker network attached only to cloudflared.
 
-PostgreSQL listens only inside the backend network as `postgres:5432`. PersonalHub listens only inside that network as `app:3000`. Neither service joins the edge network. Cloudflared is the sole dual-homed connector: it receives requests over outbound tunnel connections on the edge network and forwards them to `http://app:3000` over the internal backend. There are no host mappings for 3000, 3001, 3002, or 5432, and no AWS inbound application rule.
+PostgreSQL listens only inside the backend network as `postgres:5432` and remains backend-only. PersonalHub listens as `app:3000` on the internal backend and also joins the dedicated app-egress network for outbound HTTPS to provider APIs. The app does not join the edge network, and app-egress publishes no inbound port. Cloudflared remains the sole ingress connector: it receives requests over outbound tunnel connections on the edge network and forwards them to `http://app:3000` over the internal backend. There are no host mappings for 3000, 3001, 3002, or 5432, and no AWS inbound application rule.
 
 All three services use `restart: unless-stopped`. Docker therefore restarts them after Docker daemon or host recovery unless an operator deliberately stopped them. Deployment and verification use Systems Manager; SSH remains disabled.
 

@@ -145,6 +145,35 @@ class DeploymentHelperTests(unittest.TestCase):
         self.assertLess(operations.events.index("backup"), operations.events.index("migrate"))
         self.assertLess(operations.events.index("migrate"), operations.events.index("write:" + "b" * 40))
 
+    def test_runtime_switch_force_recreates_only_the_application(self):
+        class RecordingRunner:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, argv, stage, **kwargs):
+                self.calls.append((argv, stage, kwargs))
+
+        operations = self.deploy.ProductionOperations()
+        operations.runner = RecordingRunner()
+        operations.recreate_app()
+        self.assertEqual(
+            operations.runner.calls,
+            [
+                (
+                    [
+                        self.deploy.COMPOSE,
+                        "up",
+                        "--detach",
+                        "--no-deps",
+                        "--force-recreate",
+                        "app",
+                    ],
+                    "app-recreate",
+                    {},
+                )
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

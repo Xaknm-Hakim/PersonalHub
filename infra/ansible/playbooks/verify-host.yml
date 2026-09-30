@@ -149,12 +149,15 @@
           - inspect
           - --format
           - >-
-            {{ "{{" }}json .State{{ "}}" }}|{{ "{{" }}json .NetworkSettings.Networks{{ "}}" }}
+            {{ "{{" }}json .State{{ "}}" }}|
+            {{ "{{" }}json .NetworkSettings.Networks{{ "}}" }}|
+            {{ "{{" }}json .HostConfig.PortBindings{{ "}}" }}
           - "personalhub-{{ item.service }}-1"
       loop:
         - service: app
           networks:
             - personalhub-production-backend
+            - personalhub-production-app-egress
         - service: postgres
           networks:
             - personalhub-production-backend
@@ -173,9 +176,36 @@
           - >-
             ((item.stdout.split('|')[1] | from_json | dict2items |
             map(attribute='key') | sort) == (item.item.networks | sort))
+          - >-
+            ((item.stdout.split('|')[2] | from_json | default({}, true) |
+            length) == 0)
       loop: "{{ production_containers.results }}"
       loop_control:
         label: "{{ item.item.service }}"
+
+    - name: Read PostgreSQL volume mount identity
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - inspect
+          - --format
+          - '{{ "{{" }}json .Mounts{{ "}}" }}'
+          - personalhub-postgres-1
+      register: postgres_mounts
+      changed_when: false
+
+    - name: Verify PostgreSQL uses only the established named data volume
+      ansible.builtin.assert:
+        that:
+          - (postgres_mounts.stdout | from_json | length) == 1
+          - >-
+            ((postgres_mounts.stdout | from_json |
+            selectattr('Destination', 'equalto', '/var/lib/postgresql/data') |
+            map(attribute='Name') | list) ==
+            ['personalhub-production-postgres-data'])
+          - >-
+            ((postgres_mounts.stdout | from_json |
+            map(attribute='Type') | list) == ['volume'])
 
     - name: Read Cloudflare Tunnel token file metadata
       ansible.builtin.stat:
@@ -201,15 +231,17 @@
           - '{{ "{{" }}json .Internal{{ "}}" }}'
       loop:
         - personalhub-production-backend
+        - personalhub-production-app-egress
         - personalhub-production-edge
       register: production_networks
       changed_when: false
 
-    - name: Verify backend isolation and edge egress
+    - name: Verify backend isolation and dedicated egress networks
       ansible.builtin.assert:
         that:
           - production_networks.results[0].stdout == "true"
           - production_networks.results[1].stdout == "false"
+          - production_networks.results[2].stdout == "false"
 
     - name: Verify ECR authorization through the instance role
       ansible.builtin.command:

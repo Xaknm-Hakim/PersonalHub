@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     networks:
       - backend
+      - app_egress
     restart: unless-stopped
     init: true
     healthcheck:
@@ -118,5 +119,7 @@ networks:
   backend:
     name: personalhub-production-backend
     internal: true
+  app_egress:
+    name: personalhub-production-app-egress
   edge:
     name: personalhub-production-edge
