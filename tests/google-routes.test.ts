@@ -9,15 +9,27 @@ const state = vi.hoisted(() => ({
   logEvent: vi.fn(),
   complete: vi.fn(),
   sync: vi.fn(),
-  disconnect: vi.fn()
+  disconnect: vi.fn(),
+  actionHeaders: new Headers(),
+  trustProxy: false
 }));
 
-vi.mock("@/lib/auth/web-session", () => ({
-  requireOwnerSession: vi.fn(async () => {
+vi.mock("@/lib/auth/web-session", async () => {
+  const { assertSameOrigin } = await vi.importActual<
+    typeof import("@/lib/security/origin")
+  >("@/lib/security/origin");
+  const ownerSession = async () => {
     if (state.sessionError) throw state.sessionError;
     return { id: state.initiatingSessionId };
-  })
-}));
+  };
+  return {
+    requireOwnerSession: vi.fn(ownerSession),
+    requireOwnerAction: vi.fn(async () => {
+      assertSameOrigin(state.actionHeaders, state.trustProxy);
+      return ownerSession();
+    })
+  };
+});
 vi.mock("@/lib/auth/owner", () => ({
   validateSessionId: vi.fn(async (id: string) => {
     if (state.sessionValidationError) throw state.sessionValidationError;
@@ -49,6 +61,7 @@ vi.mock("@/services/integrations/google/service", () => ({
 
 import { GET as connect } from "@/app/api/v1/integrations/google/connect/route";
 import { GET as callback } from "@/app/api/v1/integrations/google/callback/route";
+import { POST as disconnect } from "@/app/api/v1/integrations/google/disconnect/route";
 import { POST as sync } from "@/app/api/v1/integrations/google/sync/route";
 import { GoogleOAuthCallbackError } from "@/services/integrations/google/callback-observability";
 import {
@@ -82,6 +95,11 @@ describe("Google browser integration route security", () => {
     state.complete.mockReset().mockResolvedValue({ id: "integration" });
     state.sync.mockReset();
     state.disconnect.mockReset();
+    state.actionHeaders = new Headers({
+      host: "personalhub.example",
+      origin: "https://personalhub.example"
+    });
+    state.trustProxy = false;
   });
 
   it("requires owner browser authentication and does not accept API-token-only initiation", async () => {
@@ -276,17 +294,100 @@ describe("Google browser integration route security", () => {
     );
   });
 
-  it("rejects cross-origin manual sync before provider access", async () => {
-    const response = await sync(
-      new Request(
-        "https://personalhub.example/api/v1/integrations/google/sync",
-        {
-          method: "POST",
-          headers: { origin: "https://attacker.example" }
-        }
-      )
+  const actionRequest = (action: "sync" | "disconnect") =>
+    new Request(
+      `https://personalhub.example/api/v1/integrations/google/${action}`,
+      { method: "POST", headers: state.actionHeaders }
     );
+
+  it.each([
+    ["sync", sync, state.sync],
+    ["disconnect", disconnect, state.disconnect]
+  ] as const)(
+    "accepts %s through the trusted production proxy origin policy",
+    async (action, route, operation) => {
+      state.trustProxy = true;
+      state.actionHeaders = new Headers({
+        host: "app:3000",
+        "x-forwarded-host": "personalhub.studexhub.com",
+        "x-forwarded-proto": "https",
+        origin: "https://personalhub.studexhub.com"
+      });
+
+      const response = await route(actionRequest(action));
+
+      expect(response.status).toBe(303);
+      expect(operation).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("accepts a matching direct origin", async () => {
+    const response = await sync(actionRequest("sync"));
+
+    expect(response.status).toBe(303);
+    expect(state.sync).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["missing", new Headers({ host: "personalhub.example" })],
+    [
+      "mismatched",
+      new Headers({
+        host: "personalhub.example",
+        origin: "https://attacker.example"
+      })
+    ],
+    [
+      "malformed",
+      new Headers({ host: "personalhub.example", origin: "not a URL" })
+    ]
+  ])("rejects a %s origin before Google access", async (_label, headers) => {
+    state.actionHeaders = headers;
+
+    const response = await sync(actionRequest("sync"));
+
     expect(response.status).toBe(403);
+    expect(state.sync).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a spoofed forwarded host when proxy trust is disabled", async () => {
+    state.actionHeaders = new Headers({
+      host: "app:3000",
+      "x-forwarded-host": "personalhub.example",
+      origin: "https://personalhub.example"
+    });
+
+    const response = await sync(actionRequest("sync"));
+
+    expect(response.status).toBe(403);
+    expect(state.sync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["sync", sync, state.sync],
+    ["disconnect", disconnect, state.disconnect]
+  ] as const)(
+    "applies the same mismatched-origin rejection to %s",
+    async (action, route, operation) => {
+      state.actionHeaders = new Headers({
+        host: "personalhub.example",
+        origin: "https://attacker.example"
+      });
+
+      const response = await route(actionRequest(action));
+
+      expect(response.status).toBe(403);
+      expect(operation).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps owner authentication mandatory after origin validation", async () => {
+    state.sessionError = new Error("unauthenticated");
+
+    await expect(sync(actionRequest("sync"))).rejects.toThrow(
+      "unauthenticated"
+    );
+
     expect(state.sync).not.toHaveBeenCalled();
   });
 });
