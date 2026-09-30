@@ -35,6 +35,9 @@ const googleCallbackFailureMessages: Record<string, string> = {
     "Google connection failed during OAuth transaction validation.",
   session_validation:
     "Google connection failed because the initiating owner session is no longer valid.",
+  state_validation: "Google connection failed during OAuth state validation.",
+  authorization_denied:
+    "Google connection failed because authorization was not granted.",
   authorization_code:
     "Google connection failed because the authorization response was incomplete.",
   token_exchange: "Google connection failed during token exchange.",
@@ -48,7 +51,41 @@ const googleCallbackFailureMessages: Record<string, string> = {
   callback_processing: "Google connection failed while processing the callback."
 };
 
-function googleMessage(params: { google?: string; stage?: string }) {
+const googleTokenExchangeReasonMessages: Record<string, string> = {
+  provider_invalid_grant:
+    "Google connection failed during token exchange (provider rejected the authorization grant).",
+  provider_invalid_client:
+    "Google connection failed during token exchange (provider rejected the OAuth client).",
+  provider_rejected:
+    "Google connection failed during token exchange (provider rejected the token request).",
+  provider_unavailable:
+    "Google connection failed during token exchange (provider was unavailable).",
+  provider_http_error:
+    "Google connection failed during token exchange (provider returned an unexpected HTTP response).",
+  request_timeout:
+    "Google connection failed during token exchange (provider request timed out).",
+  malformed_response:
+    "Google connection failed during token exchange (provider returned an invalid response).",
+  network_error:
+    "Google connection failed during token exchange (provider could not be reached).",
+  unexpected:
+    "Google connection failed during token exchange (an unexpected exchange error occurred)."
+};
+
+function googleMessage(params: {
+  google?: string;
+  stage?: string;
+  reason?: string;
+}) {
+  if (
+    params.google === "callback_error" &&
+    params.stage === "token_exchange" &&
+    params.reason
+  )
+    return (
+      googleTokenExchangeReasonMessages[params.reason] ??
+      googleCallbackFailureMessages.token_exchange
+    );
   if (params.google === "callback_error" && params.stage)
     return (
       googleCallbackFailureMessages[params.stage] ??
@@ -60,7 +97,7 @@ function googleMessage(params: { google?: string; stage?: string }) {
 export default async function SettingsPage({
   searchParams
 }: {
-  searchParams: Promise<{ google?: string; stage?: string }>;
+  searchParams: Promise<{ google?: string; stage?: string; reason?: string }>;
 }) {
   const [tokens, google, params] = await Promise.all([
     listApiTokens(),

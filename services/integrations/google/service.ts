@@ -13,7 +13,10 @@ import {
   refreshGoogleAccessToken,
   revokeGoogleAuthorization
 } from "./client";
-import { GoogleOAuthCallbackError } from "./callback-observability";
+import {
+  GoogleOAuthCallbackError,
+  type GoogleOAuthTokenExchangeReason
+} from "./callback-observability";
 import { GOOGLE_CALLBACK_PATH, GOOGLE_PROVIDER } from "./constants";
 import { syncGoogleCalendar, withGoogleSyncLease } from "./sync";
 
@@ -49,6 +52,26 @@ type CompleteGoogleConnectionOptions = {
   }) => Promise<{ id: string }>;
 };
 
+function tokenExchangeReason(error: unknown): GoogleOAuthTokenExchangeReason {
+  if (!(error instanceof GoogleIntegrationError)) return "unexpected";
+  if (error.code === "invalid_grant") return "provider_invalid_grant";
+  if (error.code === "invalid_client") return "provider_invalid_client";
+  if (error.code === "REQUEST_TIMEOUT") return "request_timeout";
+  if (error.code === "NETWORK_ERROR") return "network_error";
+  if (
+    error.code === "UNAVAILABLE" ||
+    error.code === "temporarily_unavailable" ||
+    error.code === "server_error" ||
+    (error.status !== undefined && error.status >= 500)
+  )
+    return "provider_unavailable";
+  if (error.code === "MALFORMED_RESPONSE") return "malformed_response";
+  if (error.status !== undefined && error.status >= 400 && error.status < 500)
+    return "provider_rejected";
+  if (error.status !== undefined) return "provider_http_error";
+  return "unexpected";
+}
+
 function exchangeFailure(error: unknown) {
   if (
     error instanceof GoogleIntegrationError &&
@@ -60,7 +83,10 @@ function exchangeFailure(error: unknown) {
     error.code === "INSUFFICIENT_SCOPE"
   )
     return new GoogleOAuthCallbackError("scope_validation");
-  return new GoogleOAuthCallbackError("token_exchange");
+  return new GoogleOAuthCallbackError(
+    "token_exchange",
+    tokenExchangeReason(error)
+  );
 }
 
 export async function completeGoogleConnection(

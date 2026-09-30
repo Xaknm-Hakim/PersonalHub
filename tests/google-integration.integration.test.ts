@@ -84,11 +84,74 @@ describe("Google integration authorization persistence", () => {
   });
 
   it.each([
-    [new Error("provider detail"), "token_exchange"],
+    [
+      new GoogleIntegrationError("invalid_grant", 400),
+      "provider_invalid_grant"
+    ],
+    [
+      new GoogleIntegrationError("invalid_client", 401),
+      "provider_invalid_client"
+    ],
+    [
+      new GoogleIntegrationError("temporarily_unavailable", 503),
+      "provider_unavailable"
+    ],
+    [
+      new GoogleIntegrationError("MALFORMED_RESPONSE", 503),
+      "provider_unavailable"
+    ],
+    [new GoogleIntegrationError("REQUEST_TIMEOUT"), "request_timeout"],
+    [
+      new GoogleIntegrationError("MALFORMED_RESPONSE", 200),
+      "malformed_response"
+    ],
+    [new GoogleIntegrationError("NETWORK_ERROR"), "network_error"],
+    [
+      new GoogleIntegrationError("unknown_provider_value", 400),
+      "provider_rejected"
+    ],
+    [new Error("provider detail"), "unexpected"]
+  ] as const)(
+    "classifies a token exchange failure without persistence as %s",
+    async (error, reason) => {
+      await expect(
+        completeGoogleConnection("code", "verifier", {
+          exchange: async () => {
+            throw error;
+          }
+        })
+      ).rejects.toEqual(new GoogleOAuthCallbackError("token_exchange", reason));
+      expect(await prisma.integration.count()).toBe(0);
+    }
+  );
+
+  it("does not log provider details or OAuth inputs while classifying exchange failure", async () => {
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        completeGoogleConnection("sensitive-code", "sensitive-verifier", {
+          exchange: async () => {
+            throw new GoogleIntegrationError("sensitive-provider-error", 400);
+          }
+        })
+      ).rejects.toEqual(
+        new GoogleOAuthCallbackError("token_exchange", "provider_rejected")
+      );
+      const captured = output.mock.calls.flat().join("\n");
+      expect(captured).toContain("google_oauth_token_exchange_started");
+      expect(captured).not.toContain("sensitive-code");
+      expect(captured).not.toContain("sensitive-verifier");
+      expect(captured).not.toContain("sensitive-provider-error");
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  it.each([
     [new GoogleIntegrationError("MISSING_REFRESH_TOKEN"), "refresh_token"],
     [new GoogleIntegrationError("INSUFFICIENT_SCOPE"), "scope_validation"]
   ] as const)(
-    "classifies an exchange failure without persistence as %s",
+    "classifies an exchange result failure without persistence as %s",
     async (error, stage) => {
       await expect(
         completeGoogleConnection("code", "verifier", {

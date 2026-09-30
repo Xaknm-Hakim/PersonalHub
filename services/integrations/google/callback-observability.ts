@@ -14,15 +14,39 @@ export const googleOAuthFailureStages = [
 
 export type GoogleOAuthFailureStage = (typeof googleOAuthFailureStages)[number];
 
+export const googleOAuthTokenExchangeReasons = [
+  "provider_invalid_grant",
+  "provider_invalid_client",
+  "provider_rejected",
+  "provider_unavailable",
+  "provider_http_error",
+  "request_timeout",
+  "malformed_response",
+  "network_error",
+  "unexpected"
+] as const;
+
+export type GoogleOAuthTokenExchangeReason =
+  (typeof googleOAuthTokenExchangeReasons)[number];
+
 export class GoogleOAuthCallbackError extends Error {
-  constructor(public readonly stage: GoogleOAuthFailureStage) {
+  public readonly reason?: GoogleOAuthTokenExchangeReason;
+
+  constructor(
+    public readonly stage: GoogleOAuthFailureStage,
+    reason?: GoogleOAuthTokenExchangeReason
+  ) {
     super("Google OAuth callback did not complete.");
     this.name = "GoogleOAuthCallbackError";
+    this.reason = stage === "token_exchange" ? reason : undefined;
   }
 }
 
-export function googleOAuthFailureStage(error: unknown) {
+export function googleOAuthFailure(error: unknown): {
+  stage: GoogleOAuthFailureStage;
+  reason?: GoogleOAuthTokenExchangeReason;
+} {
   return error instanceof GoogleOAuthCallbackError
-    ? error.stage
-    : "callback_processing";
+    ? { stage: error.stage, reason: error.reason }
+    : { stage: "callback_processing" };
 }

@@ -149,6 +149,40 @@ try {
   assert.equal((await context.cookies()).length, 0);
   await page.screenshot({ path: `${artifacts}/privacy.png`, fullPage: true });
 
+  const publicCompletion = await context.request.get(
+    "/oauth/google/complete?google=callback_error&stage=token_exchange&reason=provider_invalid_grant&code=secret-code&state=secret-state&token=secret-token&destination=https%3A%2F%2Fattacker.example",
+    { maxRedirects: 0 }
+  );
+  assert.equal(publicCompletion.status(), 307);
+  const completionLocation = new URL(
+    publicCompletion.headers().location,
+    baseURL
+  );
+  assert.ok(["127.0.0.1", "localhost"].includes(completionLocation.hostname));
+  assert.equal(completionLocation.pathname, "/oauth/google/complete/bounce");
+  assert.equal(
+    completionLocation.hash,
+    "#google=callback_error&stage=token_exchange&reason=provider_invalid_grant"
+  );
+  const publicCompletionBody = await publicCompletion.text();
+  for (const forbidden of [
+    "secret-code",
+    "secret-state",
+    "secret-token",
+    "attacker.example"
+  ])
+    assert.equal(publicCompletionBody.includes(forbidden), false);
+  const publicBounce = await context.request.get(
+    "/oauth/google/complete/bounce"
+  );
+  assert.equal(publicBounce.status(), 200);
+  assert.match(await publicBounce.text(), /Finishing Google connection/);
+
+  await goto(
+    "/oauth/google/complete?google=callback_error&stage=token_exchange&reason=provider_invalid_grant"
+  );
+  await page.waitForURL(/\/login$/);
+
   await goto("/");
   await page.waitForURL(/\/login$/);
   await page.getByRole("heading", { name: "Sign in to PersonalHub" }).waitFor();
@@ -170,6 +204,23 @@ try {
   assert.equal(sessionCookie.secure, true);
   assert.equal(sessionCookie.sameSite, "Strict");
   assert.equal(sessionCookie.path, "/");
+
+  const crossSiteOrigin = baseURL.replace("127.0.0.1", "localhost");
+  await page.goto(`${crossSiteOrigin}/about`);
+  await page.evaluate(
+    (destination) => window.location.assign(destination),
+    `${baseURL}/oauth/google/complete?google=callback_error&stage=token_exchange&reason=provider_invalid_grant`
+  );
+  await page.waitForURL(
+    `${baseURL}/settings?google=callback_error&stage=token_exchange&reason=provider_invalid_grant`
+  );
+  await page
+    .getByText(
+      "Google connection failed during token exchange (provider rejected the authorization grant)."
+    )
+    .waitFor();
+  await page.goto(`${baseURL}/`);
+  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
 
   const sidebar = page.locator("aside");
   const brand = page.getByRole("link", { name: "PersonalHub", exact: true });
@@ -416,10 +467,77 @@ try {
     ]
   ];
   for (const [stage, message] of googleCallbackFailures) {
-    await goto(`/settings?google=callback_error&stage=${stage}`);
+    await goto(`/oauth/google/complete?google=callback_error&stage=${stage}`);
+    await page.waitForURL(
+      `${baseURL}/settings?google=callback_error&stage=${stage}`
+    );
     await page.getByText(message, { exact: true }).waitFor();
     assert.equal(new URL(page.url()).searchParams.get("stage"), stage);
   }
+
+  const googleTokenExchangeReasons = [
+    [
+      "provider_invalid_grant",
+      "Google connection failed during token exchange (provider rejected the authorization grant)."
+    ],
+    [
+      "provider_invalid_client",
+      "Google connection failed during token exchange (provider rejected the OAuth client)."
+    ],
+    [
+      "provider_rejected",
+      "Google connection failed during token exchange (provider rejected the token request)."
+    ],
+    [
+      "provider_unavailable",
+      "Google connection failed during token exchange (provider was unavailable)."
+    ],
+    [
+      "provider_http_error",
+      "Google connection failed during token exchange (provider returned an unexpected HTTP response)."
+    ],
+    [
+      "request_timeout",
+      "Google connection failed during token exchange (provider request timed out)."
+    ],
+    [
+      "malformed_response",
+      "Google connection failed during token exchange (provider returned an invalid response)."
+    ],
+    [
+      "network_error",
+      "Google connection failed during token exchange (provider could not be reached)."
+    ],
+    [
+      "unexpected",
+      "Google connection failed during token exchange (an unexpected exchange error occurred)."
+    ]
+  ];
+  for (const [reason, message] of googleTokenExchangeReasons) {
+    await goto(
+      `/oauth/google/complete?google=callback_error&stage=token_exchange&reason=${reason}`
+    );
+    await page.waitForURL(
+      `${baseURL}/settings?google=callback_error&stage=token_exchange&reason=${reason}`
+    );
+    await page.getByText(message, { exact: true }).waitFor();
+  }
+
+  await goto(
+    "/oauth/google/complete?google=callback_error&stage=token_exchange&reason=raw-provider-error&code=secret-code&state=secret-state&destination=https%3A%2F%2Fattacker.example"
+  );
+  await page.waitForURL(
+    `${baseURL}/settings?google=callback_error&stage=token_exchange`
+  );
+  await page
+    .getByText("Google connection failed during token exchange.", {
+      exact: true
+    })
+    .waitFor();
+
+  await goto("/oauth/google/complete?google=connected");
+  await page.waitForURL(`${baseURL}/settings?google=connected`);
+  await page.getByText("Google Calendar connected.", { exact: true }).waitFor();
   await goto("/settings");
   await page.getByLabel("Token name").fill(apiTokenName);
   await page.getByLabel("Write").check();

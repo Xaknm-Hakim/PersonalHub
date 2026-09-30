@@ -5,9 +5,11 @@ import { googleIntegrationEnv } from "@/lib/env";
 import { logEvent } from "@/lib/logging";
 import { completeGoogleConnection } from "@/services/integrations/google/service";
 import {
-  googleOAuthFailureStage,
-  type GoogleOAuthFailureStage
+  googleOAuthFailure,
+  type GoogleOAuthFailureStage,
+  type GoogleOAuthTokenExchangeReason
 } from "@/services/integrations/google/callback-observability";
+import type { GoogleOAuthCompletionResult } from "@/services/integrations/google/completion";
 import {
   GOOGLE_CALLBACK_PATH,
   GOOGLE_OAUTH_COOKIE
@@ -18,19 +20,31 @@ import {
   parseGoogleOAuthTransaction
 } from "@/services/integrations/google/oauth";
 
-function settingsRedirect(origin: string, result: string) {
-  return NextResponse.redirect(`${origin}/settings?google=${result}`);
+function completionRedirect(
+  origin: string,
+  result: GoogleOAuthCompletionResult
+) {
+  return NextResponse.redirect(
+    `${origin}/oauth/google/complete?google=${result}`
+  );
 }
 
 function failureRedirect(
   origin: string,
   stage: GoogleOAuthFailureStage,
-  result = "callback_error"
+  result: GoogleOAuthCompletionResult = "callback_error",
+  reason?: GoogleOAuthTokenExchangeReason
 ) {
-  logEvent("warn", "google_oauth_callback_failed", { stage });
-  const url = new URL("/settings", origin);
+  logEvent(
+    "warn",
+    "google_oauth_callback_failed",
+    reason ? { stage, reason } : { stage }
+  );
+  const url = new URL("/oauth/google/complete", origin);
   url.searchParams.set("google", result);
   if (result === "callback_error") url.searchParams.set("stage", stage);
+  if (result === "callback_error" && stage === "token_exchange" && reason)
+    url.searchParams.set("reason", reason);
   return NextResponse.redirect(url);
 }
 
@@ -87,8 +101,14 @@ export async function GET(request: Request) {
     if (!code)
       return failureRedirect(config.publicOrigin, "authorization_code");
     await completeGoogleConnection(code, transaction.codeVerifier);
-    return settingsRedirect(config.publicOrigin, "connected");
+    return completionRedirect(config.publicOrigin, "connected");
   } catch (error) {
-    return failureRedirect(config.publicOrigin, googleOAuthFailureStage(error));
+    const failure = googleOAuthFailure(error);
+    return failureRedirect(
+      config.publicOrigin,
+      failure.stage,
+      "callback_error",
+      failure.reason
+    );
   }
 }

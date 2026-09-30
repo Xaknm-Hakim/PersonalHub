@@ -53,7 +53,8 @@ import { POST as sync } from "@/app/api/v1/integrations/google/sync/route";
 import { GoogleOAuthCallbackError } from "@/services/integrations/google/callback-observability";
 import {
   createGoogleOAuthTransaction,
-  deriveOAuthTransactionSigningKey
+  deriveOAuthTransactionSigningKey,
+  parseGoogleOAuthTransaction
 } from "@/services/integrations/google/oauth";
 
 const signingKey = deriveOAuthTransactionSigningKey(
@@ -92,6 +93,9 @@ describe("Google browser integration route security", () => {
     const response = await connect();
     const parsed = new URL(response.headers.get("location")!);
     expect(parsed.searchParams.get("state")).toBeTruthy();
+    expect(parsed.searchParams.get("redirect_uri")).toBe(
+      "https://personalhub.example/api/v1/integrations/google/callback"
+    );
     expect(state.cookieValue).toBeTruthy();
     expect(state.cookieValue).not.toContain("owner-session");
   });
@@ -102,11 +106,11 @@ describe("Google browser integration route security", () => {
     const response = await callback(callbackRequest(pending.state));
 
     expect(response.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=connected"
+      "https://personalhub.example/oauth/google/complete?google=connected"
     );
     expect(state.complete).toHaveBeenCalledWith(
       "code",
-      expect.stringMatching(/^[A-Za-z0-9_-]{43,128}$/)
+      parseGoogleOAuthTransaction(pending.cookieValue, signingKey).codeVerifier
     );
     expect(state.cookieValue).toBe("");
   });
@@ -137,7 +141,7 @@ describe("Google browser integration route security", () => {
     state.cookieValue = transaction().cookieValue;
     const response = await callback(callbackRequest("wrong"));
     expect(response.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=state_error"
+      "https://personalhub.example/oauth/google/complete?google=state_error"
     );
     expect(state.complete).not.toHaveBeenCalled();
   });
@@ -150,7 +154,7 @@ describe("Google browser integration route security", () => {
     state.cookieValue = cookieValue;
     const response = await callback(callbackRequest("state"));
     expect(response.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=callback_error&stage=transaction_validation"
+      "https://personalhub.example/oauth/google/complete?google=callback_error&stage=transaction_validation"
     );
     expect(state.logEvent).toHaveBeenCalledWith(
       "warn",
@@ -167,7 +171,7 @@ describe("Google browser integration route security", () => {
       state.cookieValue = pending.cookieValue;
       const response = await callback(callbackRequest(pending.state));
       expect(response.headers.get("location")).toBe(
-        "https://personalhub.example/settings?google=callback_error&stage=session_validation"
+        "https://personalhub.example/oauth/google/complete?google=callback_error&stage=session_validation"
       );
       expect(state.complete).not.toHaveBeenCalled();
     }
@@ -181,7 +185,7 @@ describe("Google browser integration route security", () => {
     const response = await callback(callbackRequest(pending.state));
 
     expect(response.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=callback_error&stage=session_validation"
+      "https://personalhub.example/oauth/google/complete?google=callback_error&stage=session_validation"
     );
     expect(state.complete).not.toHaveBeenCalled();
   });
@@ -192,7 +196,7 @@ describe("Google browser integration route security", () => {
     await callback(callbackRequest(pending.state));
     const replay = await callback(callbackRequest(pending.state));
     expect(replay.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=callback_error&stage=transaction_validation"
+      "https://personalhub.example/oauth/google/complete?google=callback_error&stage=transaction_validation"
     );
     expect(state.complete).toHaveBeenCalledTimes(1);
   });
@@ -202,7 +206,9 @@ describe("Google browser integration route security", () => {
     state.cookieValue = stateMismatch.cookieValue;
     expect(
       (await callback(callbackRequest("wrong"))).headers.get("location")
-    ).toBe("https://personalhub.example/settings?google=state_error");
+    ).toBe(
+      "https://personalhub.example/oauth/google/complete?google=state_error"
+    );
 
     const denied = transaction();
     state.cookieValue = denied.cookieValue;
@@ -210,7 +216,9 @@ describe("Google browser integration route security", () => {
       (
         await callback(callbackRequest(denied.state, "&error=access_denied"))
       ).headers.get("location")
-    ).toBe("https://personalhub.example/settings?google=authorization_denied");
+    ).toBe(
+      "https://personalhub.example/oauth/google/complete?google=authorization_denied"
+    );
   });
 
   it("classifies a missing authorization code", async () => {
@@ -218,7 +226,7 @@ describe("Google browser integration route security", () => {
     state.cookieValue = pending.cookieValue;
     const response = await callback(callbackRequest(pending.state, ""));
     expect(response.headers.get("location")).toBe(
-      "https://personalhub.example/settings?google=callback_error&stage=authorization_code"
+      "https://personalhub.example/oauth/google/complete?google=callback_error&stage=authorization_code"
     );
     expect(state.complete).not.toHaveBeenCalled();
   });
@@ -239,7 +247,7 @@ describe("Google browser integration route security", () => {
       const response = await callback(callbackRequest(pending.state));
 
       expect(response.headers.get("location")).toBe(
-        `https://personalhub.example/settings?google=callback_error&stage=${stage}`
+        `https://personalhub.example/oauth/google/complete?google=callback_error&stage=${stage}`
       );
       expect(state.logEvent).toHaveBeenLastCalledWith(
         "warn",
@@ -248,6 +256,25 @@ describe("Google browser integration route security", () => {
       );
     }
   );
+
+  it("logs and redirects a bounded token exchange reason", async () => {
+    const pending = transaction();
+    state.cookieValue = pending.cookieValue;
+    state.complete.mockRejectedValueOnce(
+      new GoogleOAuthCallbackError("token_exchange", "provider_invalid_grant")
+    );
+
+    const response = await callback(callbackRequest(pending.state));
+
+    expect(response.headers.get("location")).toBe(
+      "https://personalhub.example/oauth/google/complete?google=callback_error&stage=token_exchange&reason=provider_invalid_grant"
+    );
+    expect(state.logEvent).toHaveBeenLastCalledWith(
+      "warn",
+      "google_oauth_callback_failed",
+      { stage: "token_exchange", reason: "provider_invalid_grant" }
+    );
+  });
 
   it("rejects cross-origin manual sync before provider access", async () => {
     const response = await sync(

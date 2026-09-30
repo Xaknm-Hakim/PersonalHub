@@ -16,6 +16,46 @@ const projection = {
 };
 
 describe("Google HTTP boundary", () => {
+  it("sends the authorization code exchange using Google's exact form contract", async () => {
+    const request = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          refresh_token: "refresh",
+          scope: GOOGLE_CALENDAR_SCOPE
+        }),
+        { status: 200 }
+      )
+    );
+    await exchangeGoogleAuthorizationCode(
+      {
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        redirectUri: "https://personalhub.example/oauth-callback"
+      },
+      "authorization-code",
+      "pkce-verifier",
+      { fetchImplementation: request }
+    );
+
+    expect(request).toHaveBeenCalledOnce();
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe("https://oauth2.googleapis.com/token");
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(new URLSearchParams(init.body as URLSearchParams)).toEqual(
+      new URLSearchParams({
+        client_id: "client-id",
+        client_secret: "client-secret",
+        code: "authorization-code",
+        code_verifier: "pkce-verifier",
+        grant_type: "authorization_code",
+        redirect_uri: "https://personalhub.example/oauth-callback"
+      })
+    );
+  });
+
   it("accepts refresh authorization only when both selected scopes were granted", async () => {
     const config = {
       clientId: "client",
@@ -62,6 +102,110 @@ describe("Google HTTP boundary", () => {
     });
   });
 
+  it.each([
+    ["invalid_grant", 400],
+    ["invalid_client", 401],
+    ["unknown_provider_value", 400]
+  ])(
+    "preserves provider code %s only for internal classification",
+    async (code, status) => {
+      await expect(
+        exchangeGoogleAuthorizationCode(
+          {
+            clientId: "client",
+            clientSecret: "secret",
+            redirectUri: "https://personalhub.example/callback"
+          },
+          "authorization-code",
+          "pkce-verifier",
+          {
+            fetchImplementation: vi.fn().mockResolvedValue(
+              new Response(
+                JSON.stringify({
+                  error: code,
+                  error_description: "raw-provider-description"
+                }),
+                { status }
+              )
+            )
+          }
+        )
+      ).rejects.toMatchObject({
+        code,
+        status,
+        message: "Google Calendar operation failed."
+      });
+    }
+  );
+
+  it("preserves provider unavailability after bounded retries", async () => {
+    const request = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          status: 503
+        })
+    );
+    await expect(
+      exchangeGoogleAuthorizationCode(
+        {
+          clientId: "client",
+          clientSecret: "secret",
+          redirectUri: "https://personalhub.example/callback"
+        },
+        "authorization-code",
+        "pkce-verifier",
+        {
+          fetchImplementation: request,
+          sleep: async () => undefined
+        }
+      )
+    ).rejects.toMatchObject({ code: "temporarily_unavailable", status: 503 });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [new DOMException("timed out", "TimeoutError"), "REQUEST_TIMEOUT"],
+    [new Error("network detail"), "NETWORK_ERROR"]
+  ])("classifies a failed token request as %s", async (failure, code) => {
+    const request = vi.fn().mockRejectedValue(failure);
+    await expect(
+      exchangeGoogleAuthorizationCode(
+        {
+          clientId: "client",
+          clientSecret: "secret",
+          redirectUri: "https://personalhub.example/callback"
+        },
+        "code",
+        "verifier",
+        {
+          fetchImplementation: request,
+          sleep: async () => undefined,
+          requestTimeoutMs: 5
+        }
+      )
+    ).rejects.toMatchObject({ code });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("classifies a malformed successful token response", async () => {
+    await expect(
+      exchangeGoogleAuthorizationCode(
+        {
+          clientId: "client",
+          clientSecret: "secret",
+          redirectUri: "https://personalhub.example/callback"
+        },
+        "code",
+        "verifier",
+        {
+          fetchImplementation: vi
+            .fn()
+            .mockResolvedValue(new Response("not-json", { status: 200 }))
+        }
+      )
+    ).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
   it("uses bounded retry with Retry-After for rate limits", async () => {
     const request = vi
       .fn()
@@ -106,7 +250,7 @@ describe("Google HTTP boundary", () => {
     });
 
     await expect(client.calendarExists("calendar-id")).rejects.toEqual(
-      expect.objectContaining({ code: "UNAVAILABLE" })
+      expect.objectContaining({ code: "REQUEST_TIMEOUT" })
     );
     expect(request).toHaveBeenCalledTimes(3);
   });

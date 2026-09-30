@@ -80,8 +80,14 @@ async function googleRequest(
         ...init,
         signal: AbortSignal.timeout(requestTimeoutMs)
       });
-    } catch {
-      if (attempt === 2) throw new GoogleIntegrationError("UNAVAILABLE");
+    } catch (error) {
+      if (attempt === 2)
+        throw new GoogleIntegrationError(
+          error instanceof DOMException &&
+            ["AbortError", "TimeoutError"].includes(error.name)
+            ? "REQUEST_TIMEOUT"
+            : "NETWORK_ERROR"
+        );
       await sleep(250 * 2 ** attempt);
       continue;
     }
