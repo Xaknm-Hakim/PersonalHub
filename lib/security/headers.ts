@@ -19,7 +19,7 @@ export function securityHeaders(nonce: string, secureProduction: boolean) {
   return {
     "Content-Security-Policy": contentSecurityPolicy,
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    "Referrer-Policy": "same-origin",
     "Permissions-Policy":
       "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "X-Frame-Options": "DENY",

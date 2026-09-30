@@ -21,7 +21,14 @@ const errors = [];
 const requests = [];
 let capturedServerAction;
 let captureProtectedActions = false;
+let sameOriginFormOrigin;
 page.on("request", (request) => {
+  const requestUrl = new URL(request.url());
+  if (
+    request.method() === "POST" &&
+    requestUrl.pathname === "/__browser-origin-probe"
+  )
+    sameOriginFormOrigin = request.headers()["origin"];
   const actionId = request.headers()["next-action"];
   const body = request.postDataBuffer();
   if (captureProtectedActions && !capturedServerAction && actionId && body) {
@@ -103,7 +110,8 @@ try {
     healthHeaders["content-security-policy"],
     /frame-ancestors 'none'/
   );
-  assert.equal(healthHeaders["referrer-policy"], "no-referrer");
+  assert.equal(healthHeaders["referrer-policy"], "same-origin");
+  assert.notEqual(healthHeaders["referrer-policy"], "no-referrer");
   assert.match(healthHeaders["permissions-policy"], /camera=\(\)/);
   assert.equal(healthHeaders["x-frame-options"], "DENY");
   assert.equal(healthHeaders["access-control-allow-origin"], undefined);
@@ -129,6 +137,25 @@ try {
   );
   assert.equal((await context.cookies()).length, 0);
   await page.screenshot({ path: `${artifacts}/about.png`, fullPage: true });
+
+  await page.route("**/__browser-origin-probe", (route) =>
+    route.fulfill({ status: 204 })
+  );
+  const sameOriginFormResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/__browser-origin-probe"
+  );
+  await page.evaluate(() => {
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = "/__browser-origin-probe";
+    document.body.append(form);
+    form.submit();
+  });
+  assert.equal((await sameOriginFormResponse).status(), 204);
+  assert.equal(sameOriginFormOrigin, baseURL);
+  await page.unroute("**/__browser-origin-probe");
 
   const privacyResponse = await page.goto("/privacy");
   assert.equal(privacyResponse?.status(), 200);

@@ -15,9 +15,14 @@ describe("browser mutation origin protection", () => {
     ).not.toThrow();
   });
 
-  it("rejects missing, malformed, cross-origin, and non-HTTP origins", () => {
+  it("rejects missing, null, malformed, cross-origin, and non-HTTP origins", () => {
     expect(() =>
       assertSameOrigin(new Headers({ host: "hub.example.test" }))
+    ).toThrow();
+    expect(() =>
+      assertSameOrigin(
+        new Headers({ host: "hub.example.test", origin: "null" })
+      )
     ).toThrow();
     expect(() =>
       assertSameOrigin(
@@ -60,8 +65,11 @@ describe("security response headers", () => {
     expect(headers["Content-Security-Policy"]).not.toMatch(
       /script-src[^;]*'unsafe-inline'/
     );
+    expect(headers["Content-Security-Policy"]).toContain("form-action 'self'");
     expect(headers["Strict-Transport-Security"]).toContain("max-age=");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
+    expect(headers["Referrer-Policy"]).toBe("same-origin");
+    expect(headers["Referrer-Policy"]).not.toBe("no-referrer");
   });
 
   it("permits development evaluation without enabling HSTS", () => {
