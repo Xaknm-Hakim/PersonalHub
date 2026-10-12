@@ -2,6 +2,10 @@
 
 PersonalHub is a privately hosted, single-owner personal productivity service for notes, assignments, tasks, projects, deadlines, and simple timeline planning. It is not a multi-user SaaS product.
 
+The authenticated browser application is backed by domain services and PostgreSQL. A versioned API exposes scoped machine-client operations for planning queries, quick capture, and task workflows; it is not general external CRUD for every domain. A manual, one-way Google Calendar projection syncs eligible dated tasks and assignments to a dedicated calendar. Background sync and importing Google-side edits are not implemented.
+
+The repository also contains deployment and operations workflows for infrastructure provisioning, container delivery, and PostgreSQL backup/restore. These establish the documented architecture; they do not by themselves assert current production health.
+
 ## Tech stack
 
 - Next.js 16 App Router
@@ -165,6 +169,8 @@ curl -X POST http://127.0.0.1:3002/api/v1/capture \
 
 `GET /api/health` is the only public API endpoint and returns a non-sensitive database-readiness status. CORS is intentionally disabled because native clients such as Quickshell do not require it.
 
+Google Calendar is connected through the owner-authorized Settings flow. `Sync Now` projects eligible open tasks and assignments with dates to a managed calendar; synchronization is manual and one-way. See [the integration contract](./docs/GOOGLE-CALENDAR.md) for scope and limitations.
+
 Planning dates use validated `YYYY-MM-DD` values and are persisted as PostgreSQL date values at UTC midnight; dates are not client-local instants. Closed status semantics are shared by task, assignment, dashboard, calendar, and timeline queries.
 
 ## Database commands
@@ -186,5 +192,6 @@ The archived seed file is intentionally not wired to an npm or Make command. Do 
 - [Authentication and production security](./docs/SECURITY.md)
 - [Manual acceptance checks](./docs/ACCEPTANCE_TESTS.md)
 - [Product scope](./docs/PRODUCT_SPEC.md)
+- [Google Calendar projection](./docs/GOOGLE-CALENDAR.md)
 - [Overhaul constraints and handoff](./docs/OVERHAUL-REPORT.md)
 - [AWS infrastructure and Terraform workflow](./docs/INFRASTRUCTURE.md)

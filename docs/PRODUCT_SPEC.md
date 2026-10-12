@@ -4,7 +4,7 @@
 
 ## App purpose
 
-PersonalHub is a local-first productivity app for one person using a laptop browser on localhost. It helps track diploma/student tasks, assignments, notes, private projects, deadlines, calendar dates, and simple Gantt-style planning.
+PersonalHub is a privately hosted, single-owner productivity application for tasks, assignments, notes, projects, deadlines, and date-based planning. The owner uses an authenticated browser interface; trusted external clients use the versioned, scoped API rather than direct database access.
 
 ## MVP scope
 
@@ -12,10 +12,12 @@ PersonalHub is a local-first productivity app for one person using a laptop brow
 - Tasks CRUD with status, priority, dates, filters, and overdue labels.
 - Assignments CRUD with course, type, status, priority, dates, filters, and overdue labels.
 - Projects CRUD for personal, technical, academic, event/operations, and lab-style project memory.
-- Notes CRUD with optional task or assignment links, search, and latest-updated sorting.
+- Notes CRUD with optional task, assignment, or project links, search, and latest-updated sorting.
 - Timeline with tasks, assignments, and dated projects grouped into a CSS-based horizontal plan.
 - Calendar with month navigation, task due dates, assignment deadlines, and project target/completion milestones.
-- Settings/About page with local-first explanation and version.
+- Owner authentication, settings, and theme selection.
+- Versioned API with scoped tokens and bounded planning, capture, and task operations.
+- Manual, one-way Google Calendar projection for eligible open tasks and assignments with dates.
 - Light/dark mode toggle with local browser persistence.
 
 ## Page descriptions
@@ -27,14 +29,14 @@ PersonalHub is a local-first productivity app for one person using a laptop brow
 - Notes: stores study notes and links them to work items where useful.
 - Timeline: shows assignments, tasks, and projects on a simple horizontal date range.
 - Calendar: shows a navigable monthly view of due dates, deadlines, and project milestones.
-- Settings/About: documents the local-only intent.
+- Settings: manages API tokens and the Google Calendar connection; the About page documents the application.
 
 ## Data model overview
 
 - Task: title, description, status, priority, optional start date, optional due date.
 - Assignment: course, type, title, description, status, priority, optional start date, and required deadline.
 - Project: title, description, status, type, priority, optional dates, repository URL, local path, live URL, tech stack, objective, current progress, next action, and lessons learned.
-- Note: title, body, optional linked task, optional linked assignment.
+- Note: title, body, optional linked task, assignment, or project.
 - Tag: reusable name and optional color.
 - Tasks, assignments, and notes can each have many tags.
 
@@ -72,17 +74,17 @@ Timeline integration is basic: projects appear only when `startDate` exists and 
 
 Calendar integration is milestone-only: `targetDate` appears as a project target item and `completedAt` appears as a project completed item. Full project duration bars are not shown in Calendar.
 
-## Explicit non-goals
+## Current product boundaries
 
-- Authentication
-- Team, workspace, or public sharing features
+- Single owner; no team, workspace, or public sharing features
 - Payments or SaaS billing
-- Google Calendar integration
-- Cloud sync
+- No inbound Google Calendar import, background Calendar synchronization, or conflict resolution
 - AI features
 - Email or Telegram notifications
 - GitHub API integration
 - Kanban boards
-- Milestones
+- No dedicated milestone entity beyond project target/completion dates
 - File uploads
 - Automatic local folder scanning
+
+The API is intentionally bounded rather than full CRUD for every domain. Infrastructure and deployment are documented separately; this specification does not claim that a production deployment is currently healthy.

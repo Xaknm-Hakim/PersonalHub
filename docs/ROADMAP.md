@@ -1,8 +1,8 @@
 # Roadmap
 
-> Current baseline: isolated PostgreSQL Compose runtime, shared validation/services, local task API, tags, and project links are implemented. Next UX work: inline action feedback, deliberate delete dialogs, and browser integration coverage.
+> Current baseline: authenticated single-owner application, PostgreSQL-backed domain services, versioned scoped API, project and tag workflows, manual one-way Google Calendar projection, and documented deployment/backup operations. The v3 platform and Calendar boundaries are described in [PLATFORM-V3.md](./PLATFORM-V3.md).
 
-## Version 0.1
+## Implemented product foundation
 
 - Dashboard
 - Tasks
@@ -18,16 +18,18 @@
 - Project filters and sorting
 - Project Dashboard summary
 - Basic Project Timeline and Calendar milestones
+- Owner authentication and scoped API tokens
+- Versioned planning, capture, and task API operations
+- Manual one-way Google Calendar projection for eligible dated tasks and assignments
+- Containerized PostgreSQL runtime and documented backup/restore workflows
 
-## Future version ideas
+## Remaining and future work
 
+- Improve inline action feedback and deliberate delete confirmations
+- Expand browser integration coverage
 - Recurring tasks
 - Weekly report
 - Search improvements
-- Local password lock
-- Docker improvements
-- LAN access
-- Cloudflare Tunnel only after security review
-- Project milestones
 - Project search
 - Project export
+- Background/inbound Calendar synchronization only after its semantics and operational requirements are designed
